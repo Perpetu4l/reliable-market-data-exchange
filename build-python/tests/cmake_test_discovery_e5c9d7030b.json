@@ -1,0 +1,164 @@
+{
+  "tests": 22,
+  "name": "AllTests",
+  "testsuites": [
+    {
+      "name": "OrderBookTests",
+      "tests": 13,
+      "testsuite": [
+        {
+          "name": "OrderBookInitialisesCorrectly",
+          "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/OrderBookTests.cpp",
+          "line": 14
+        },
+        {
+          "name": "CanAddBids",
+          "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/OrderBookTests.cpp",
+          "line": 23
+        },
+        {
+          "name": "CanAddAsks",
+          "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/OrderBookTests.cpp",
+          "line": 41
+        },
+        {
+          "name": "CanAddBidsSameLevel",
+          "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/OrderBookTests.cpp",
+          "line": 59
+        },
+        {
+          "name": "CanGetBidAskSpread",
+          "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/OrderBookTests.cpp",
+          "line": 79
+        },
+        {
+          "name": "CanCancelBids",
+          "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/OrderBookTests.cpp",
+          "line": 97
+        },
+        {
+          "name": "CanModifyBids",
+          "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/OrderBookTests.cpp",
+          "line": 111
+        },
+        {
+          "name": "CanMatch",
+          "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/OrderBookTests.cpp",
+          "line": 130
+        },
+        {
+          "name": "CanMatchCrossedSpreadEqualQuantity",
+          "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/MatchingEngineTests.cpp",
+          "line": 17
+        },
+        {
+          "name": "CanMatchCrossedSpreadMoreBids",
+          "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/MatchingEngineTests.cpp",
+          "line": 35
+        },
+        {
+          "name": "CanMatchCrossedSpreadMoreAsks",
+          "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/MatchingEngineTests.cpp",
+          "line": 53
+        },
+        {
+          "name": "DoesntMatchInsufficientBids",
+          "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/MatchingEngineTests.cpp",
+          "line": 71
+        },
+        {
+          "name": "OrderBookEntry",
+          "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/OrderBookEntryTests.cpp",
+          "line": 6
+        }
+      ]
+    },
+    {
+      "name": "SequenceTrackerTests",
+      "tests": 1,
+      "testsuite": [
+        {
+          "name": "DetectsGapAndDuplicate",
+          "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/ReliabilitySkeletonTests.cpp",
+          "line": 22
+        }
+      ]
+    },
+    {
+      "name": "RecoveryHistoryTests",
+      "tests": 1,
+      "testsuite": [
+        {
+          "name": "RejectsRangeOutsideBoundedHistory",
+          "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/ReliabilitySkeletonTests.cpp",
+          "line": 33
+        }
+      ]
+    },
+    {
+      "name": "DualFeedSubscriberTests",
+      "tests": 2,
+      "testsuite": [
+        {
+          "name": "ReplaysGapBeforeBufferedLaterEvent",
+          "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/ReliabilitySkeletonTests.cpp",
+          "line": 43
+        },
+        {
+          "name": "SnapshotResyncReleasesLaterBufferedEvent",
+          "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/ReliabilitySkeletonTests.cpp",
+          "line": 70
+        }
+      ]
+    },
+    {
+      "name": "SnapshotManagerTests",
+      "tests": 2,
+      "testsuite": [
+        {
+          "name": "CreatesVerifiableHashChain",
+          "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/ReliabilitySkeletonTests.cpp",
+          "line": 86
+        },
+        {
+          "name": "VerifiesTheRetainedSegmentOfAHashChain",
+          "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/ReliabilitySkeletonTests.cpp",
+          "line": 94
+        }
+      ]
+    },
+    {
+      "name": "RecoverySchedulerTests",
+      "tests": 1,
+      "testsuite": [
+        {
+          "name": "CanInstantiateBothPolicies",
+          "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/ReliabilitySkeletonTests.cpp",
+          "line": 103
+        }
+      ]
+    },
+    {
+      "name": "FaultInjectorTests",
+      "tests": 1,
+      "testsuite": [
+        {
+          "name": "UsesSeededConfiguration",
+          "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/ReliabilitySkeletonTests.cpp",
+          "line": 113
+        }
+      ]
+    },
+    {
+      "name": "RedundancyExperimentTests",
+      "tests": 1,
+      "testsuite": [
+        {
+          "name": "RecordsDesignLevelMetrics",
+          "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/ReliabilitySkeletonTests.cpp",
+          "line": 119
+        }
+      ]
+    }
+  ]
+}

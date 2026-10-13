@@ -1,0 +1,43 @@
+#pragma once
+
+#include "reliability/RecoveryProtocol.h"
+
+#include <chrono>
+#include <cstdint>
+#include <deque>
+#include <optional>
+#include <string>
+#include <unordered_map>
+
+namespace mdfeed::reliability {
+
+enum class SchedulingPolicy { FCFS, ROUND_ROBIN };
+
+struct ScheduledRecovery {
+    RecoveryRequest request;
+    std::chrono::steady_clock::time_point enqueued_at{std::chrono::steady_clock::now()};
+};
+
+struct RecoverySchedulerMetrics {
+    uint64_t recovery_request_count{0};
+    uint64_t messages_recovered{0};
+    std::unordered_map<std::string, uint64_t> per_subscriber_service_distribution;
+};
+
+// A policy seam for future shared TCP recovery-server scheduling.
+class RecoveryScheduler {
+public:
+    explicit RecoveryScheduler(SchedulingPolicy policy = SchedulingPolicy::FCFS);
+    void enqueue(RecoveryRequest request);
+    [[nodiscard]] std::optional<ScheduledRecovery> next();
+    void record_completed(const ScheduledRecovery& recovery, uint64_t messages_recovered);
+    [[nodiscard]] const RecoverySchedulerMetrics& metrics() const { return metrics_; }
+private:
+    SchedulingPolicy policy_;
+    std::deque<ScheduledRecovery> fcfs_queue_;
+    std::unordered_map<std::string, std::deque<ScheduledRecovery>> per_subscriber_;
+    std::deque<std::string> round_robin_order_;
+    RecoverySchedulerMetrics metrics_;
+};
+
+} // namespace mdfeed::reliability

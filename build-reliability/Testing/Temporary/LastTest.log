@@ -1,0 +1,246 @@
+Start testing: Oct 08 22:49 IST
+----------------------------------------------------------
+14/109 Testing: SequenceTrackerTests.DetectsGapAndDuplicate
+14/109 Test: SequenceTrackerTests.DetectsGapAndDuplicate
+Command: "/Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build-reliability/tests/Tests" "--gtest_filter=SequenceTrackerTests.DetectsGapAndDuplicate" "--gtest_also_run_disabled_tests"
+Directory: /Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build-reliability/tests
+"SequenceTrackerTests.DetectsGapAndDuplicate" start time: Oct 08 22:49 IST
+Output:
+----------------------------------------------------------
+Running main() from /Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build/_deps/googletest-src/googletest/src/gtest_main.cc
+Note: Google Test filter = SequenceTrackerTests.DetectsGapAndDuplicate
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from SequenceTrackerTests
+[ RUN      ] SequenceTrackerTests.DetectsGapAndDuplicate
+[       OK ] SequenceTrackerTests.DetectsGapAndDuplicate (0 ms)
+[----------] 1 test from SequenceTrackerTests (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"SequenceTrackerTests.DetectsGapAndDuplicate" end time: Oct 08 22:49 IST
+"SequenceTrackerTests.DetectsGapAndDuplicate" time elapsed: 00:00:00
+----------------------------------------------------------
+
+15/109 Testing: RecoveryHistoryTests.RejectsRangeOutsideBoundedHistory
+15/109 Test: RecoveryHistoryTests.RejectsRangeOutsideBoundedHistory
+Command: "/Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build-reliability/tests/Tests" "--gtest_filter=RecoveryHistoryTests.RejectsRangeOutsideBoundedHistory" "--gtest_also_run_disabled_tests"
+Directory: /Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build-reliability/tests
+"RecoveryHistoryTests.RejectsRangeOutsideBoundedHistory" start time: Oct 08 22:49 IST
+Output:
+----------------------------------------------------------
+Running main() from /Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build/_deps/googletest-src/googletest/src/gtest_main.cc
+Note: Google Test filter = RecoveryHistoryTests.RejectsRangeOutsideBoundedHistory
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from RecoveryHistoryTests
+[ RUN      ] RecoveryHistoryTests.RejectsRangeOutsideBoundedHistory
+[       OK ] RecoveryHistoryTests.RejectsRangeOutsideBoundedHistory (0 ms)
+[----------] 1 test from RecoveryHistoryTests (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Passed.
+"RecoveryHistoryTests.RejectsRangeOutsideBoundedHistory" end time: Oct 08 22:49 IST
+"RecoveryHistoryTests.RejectsRangeOutsideBoundedHistory" time elapsed: 00:00:00
+----------------------------------------------------------
+
+16/109 Testing: DualFeedSubscriberTests.ReplaysGapBeforeBufferedLaterEvent
+16/109 Test: DualFeedSubscriberTests.ReplaysGapBeforeBufferedLaterEvent
+Command: "/Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build-reliability/tests/Tests" "--gtest_filter=DualFeedSubscriberTests.ReplaysGapBeforeBufferedLaterEvent" "--gtest_also_run_disabled_tests"
+Directory: /Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build-reliability/tests
+"DualFeedSubscriberTests.ReplaysGapBeforeBufferedLaterEvent" start time: Oct 08 22:49 IST
+Output:
+----------------------------------------------------------
+Running main() from /Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build/_deps/googletest-src/googletest/src/gtest_main.cc
+Note: Google Test filter = DualFeedSubscriberTests.ReplaysGapBeforeBufferedLaterEvent
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from DualFeedSubscriberTests
+[ RUN      ] DualFeedSubscriberTests.ReplaysGapBeforeBufferedLaterEvent
+[       OK ] DualFeedSubscriberTests.ReplaysGapBeforeBufferedLaterEvent (0 ms)
+[----------] 1 test from DualFeedSubscriberTests (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+<end of output>
+Test time =   0.08 sec
+----------------------------------------------------------
+Test Passed.
+"DualFeedSubscriberTests.ReplaysGapBeforeBufferedLaterEvent" end time: Oct 08 22:49 IST
+"DualFeedSubscriberTests.ReplaysGapBeforeBufferedLaterEvent" time elapsed: 00:00:00
+----------------------------------------------------------
+
+17/109 Testing: DualFeedSubscriberTests.SnapshotResyncReleasesLaterBufferedEvent
+17/109 Test: DualFeedSubscriberTests.SnapshotResyncReleasesLaterBufferedEvent
+Command: "/Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build-reliability/tests/Tests" "--gtest_filter=DualFeedSubscriberTests.SnapshotResyncReleasesLaterBufferedEvent" "--gtest_also_run_disabled_tests"
+Directory: /Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build-reliability/tests
+"DualFeedSubscriberTests.SnapshotResyncReleasesLaterBufferedEvent" start time: Oct 08 22:49 IST
+Output:
+----------------------------------------------------------
+Running main() from /Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build/_deps/googletest-src/googletest/src/gtest_main.cc
+Note: Google Test filter = DualFeedSubscriberTests.SnapshotResyncReleasesLaterBufferedEvent
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from DualFeedSubscriberTests
+[ RUN      ] DualFeedSubscriberTests.SnapshotResyncReleasesLaterBufferedEvent
+[       OK ] DualFeedSubscriberTests.SnapshotResyncReleasesLaterBufferedEvent (0 ms)
+[----------] 1 test from DualFeedSubscriberTests (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"DualFeedSubscriberTests.SnapshotResyncReleasesLaterBufferedEvent" end time: Oct 08 22:49 IST
+"DualFeedSubscriberTests.SnapshotResyncReleasesLaterBufferedEvent" time elapsed: 00:00:00
+----------------------------------------------------------
+
+18/109 Testing: SnapshotManagerTests.CreatesVerifiableHashChain
+18/109 Test: SnapshotManagerTests.CreatesVerifiableHashChain
+Command: "/Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build-reliability/tests/Tests" "--gtest_filter=SnapshotManagerTests.CreatesVerifiableHashChain" "--gtest_also_run_disabled_tests"
+Directory: /Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build-reliability/tests
+"SnapshotManagerTests.CreatesVerifiableHashChain" start time: Oct 08 22:49 IST
+Output:
+----------------------------------------------------------
+Running main() from /Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build/_deps/googletest-src/googletest/src/gtest_main.cc
+Note: Google Test filter = SnapshotManagerTests.CreatesVerifiableHashChain
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from SnapshotManagerTests
+[ RUN      ] SnapshotManagerTests.CreatesVerifiableHashChain
+[       OK ] SnapshotManagerTests.CreatesVerifiableHashChain (0 ms)
+[----------] 1 test from SnapshotManagerTests (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"SnapshotManagerTests.CreatesVerifiableHashChain" end time: Oct 08 22:49 IST
+"SnapshotManagerTests.CreatesVerifiableHashChain" time elapsed: 00:00:00
+----------------------------------------------------------
+
+19/109 Testing: SnapshotManagerTests.VerifiesTheRetainedSegmentOfAHashChain
+19/109 Test: SnapshotManagerTests.VerifiesTheRetainedSegmentOfAHashChain
+Command: "/Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build-reliability/tests/Tests" "--gtest_filter=SnapshotManagerTests.VerifiesTheRetainedSegmentOfAHashChain" "--gtest_also_run_disabled_tests"
+Directory: /Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build-reliability/tests
+"SnapshotManagerTests.VerifiesTheRetainedSegmentOfAHashChain" start time: Oct 08 22:49 IST
+Output:
+----------------------------------------------------------
+Running main() from /Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build/_deps/googletest-src/googletest/src/gtest_main.cc
+Note: Google Test filter = SnapshotManagerTests.VerifiesTheRetainedSegmentOfAHashChain
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from SnapshotManagerTests
+[ RUN      ] SnapshotManagerTests.VerifiesTheRetainedSegmentOfAHashChain
+[       OK ] SnapshotManagerTests.VerifiesTheRetainedSegmentOfAHashChain (0 ms)
+[----------] 1 test from SnapshotManagerTests (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"SnapshotManagerTests.VerifiesTheRetainedSegmentOfAHashChain" end time: Oct 08 22:49 IST
+"SnapshotManagerTests.VerifiesTheRetainedSegmentOfAHashChain" time elapsed: 00:00:00
+----------------------------------------------------------
+
+20/109 Testing: RecoverySchedulerTests.CanInstantiateBothPolicies
+20/109 Test: RecoverySchedulerTests.CanInstantiateBothPolicies
+Command: "/Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build-reliability/tests/Tests" "--gtest_filter=RecoverySchedulerTests.CanInstantiateBothPolicies" "--gtest_also_run_disabled_tests"
+Directory: /Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build-reliability/tests
+"RecoverySchedulerTests.CanInstantiateBothPolicies" start time: Oct 08 22:49 IST
+Output:
+----------------------------------------------------------
+Running main() from /Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build/_deps/googletest-src/googletest/src/gtest_main.cc
+Note: Google Test filter = RecoverySchedulerTests.CanInstantiateBothPolicies
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from RecoverySchedulerTests
+[ RUN      ] RecoverySchedulerTests.CanInstantiateBothPolicies
+[       OK ] RecoverySchedulerTests.CanInstantiateBothPolicies (0 ms)
+[----------] 1 test from RecoverySchedulerTests (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Passed.
+"RecoverySchedulerTests.CanInstantiateBothPolicies" end time: Oct 08 22:49 IST
+"RecoverySchedulerTests.CanInstantiateBothPolicies" time elapsed: 00:00:00
+----------------------------------------------------------
+
+21/109 Testing: FaultInjectorTests.UsesSeededConfiguration
+21/109 Test: FaultInjectorTests.UsesSeededConfiguration
+Command: "/Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build-reliability/tests/Tests" "--gtest_filter=FaultInjectorTests.UsesSeededConfiguration" "--gtest_also_run_disabled_tests"
+Directory: /Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build-reliability/tests
+"FaultInjectorTests.UsesSeededConfiguration" start time: Oct 08 22:49 IST
+Output:
+----------------------------------------------------------
+Running main() from /Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build/_deps/googletest-src/googletest/src/gtest_main.cc
+Note: Google Test filter = FaultInjectorTests.UsesSeededConfiguration
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from FaultInjectorTests
+[ RUN      ] FaultInjectorTests.UsesSeededConfiguration
+[       OK ] FaultInjectorTests.UsesSeededConfiguration (0 ms)
+[----------] 1 test from FaultInjectorTests (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Passed.
+"FaultInjectorTests.UsesSeededConfiguration" end time: Oct 08 22:49 IST
+"FaultInjectorTests.UsesSeededConfiguration" time elapsed: 00:00:00
+----------------------------------------------------------
+
+22/109 Testing: RedundancyExperimentTests.RecordsDesignLevelMetrics
+22/109 Test: RedundancyExperimentTests.RecordsDesignLevelMetrics
+Command: "/Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build-reliability/tests/Tests" "--gtest_filter=RedundancyExperimentTests.RecordsDesignLevelMetrics" "--gtest_also_run_disabled_tests"
+Directory: /Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build-reliability/tests
+"RedundancyExperimentTests.RecordsDesignLevelMetrics" start time: Oct 08 22:49 IST
+Output:
+----------------------------------------------------------
+Running main() from /Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build/_deps/googletest-src/googletest/src/gtest_main.cc
+Note: Google Test filter = RedundancyExperimentTests.RecordsDesignLevelMetrics
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from RedundancyExperimentTests
+[ RUN      ] RedundancyExperimentTests.RecordsDesignLevelMetrics
+[       OK ] RedundancyExperimentTests.RecordsDesignLevelMetrics (0 ms)
+[----------] 1 test from RedundancyExperimentTests (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Passed.
+"RedundancyExperimentTests.RecordsDesignLevelMetrics" end time: Oct 08 22:49 IST
+"RedundancyExperimentTests.RecordsDesignLevelMetrics" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Oct 08 22:49 IST

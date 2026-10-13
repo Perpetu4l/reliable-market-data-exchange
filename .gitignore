@@ -1,0 +1,59 @@
+# Build directories
+cmake-build-debug/
+cmake-build-release/
+cmake-build-debug-event-trace/
+build/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# C/C++ dependencies and generated files
+*.d
+*.slo
+*.lo
+*.o
+*.obj
+*.gch
+*.pch
+
+# Libraries / binaries
+*.so
+*.dylib
+*.dll
+*.a
+*.lib
+*.exe
+*.out
+*.app
+
+# Fortran modules
+*.mod
+*.smod
+
+# Libtool
+*.lai
+*.la
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+_deps/
+
+# Qt
+.qt/
+
+# Python build artifacts
+_skbuild/
+
+# Project-specific
+orderbook/stubs
