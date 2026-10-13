@@ -96,7 +96,11 @@ cmake --build build-local --parallel
 Install `pybind11` into the Python environment used by CMake, then configure:
 
 ```sh
-cmake -S . -B build-python -DBUILD_PYTHON_BINDINGS=ON
+cmake -S . -B build-python \
+  -DBUILD_PYTHON_BINDINGS=ON \
+  -DBUILD_PROJECT_TESTS=OFF \
+  -DBUILD_BENCHMARKS=OFF \
+  -Dpybind11_DIR="$(python3 -m pybind11 --cmakedir)"
 cmake --build build-python --parallel
 ```
 

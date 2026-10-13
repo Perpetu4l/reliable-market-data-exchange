@@ -32,8 +32,16 @@ include_directories(/opt/homebrew/Cellar/spdlog/1.12.0/include)
 
 add_subdirectory(lib)
 add_subdirectory(src)
-add_subdirectory(tests)
-add_subdirectory(benchmarks)
+
+option(BUILD_PROJECT_TESTS "Build the project's GoogleTest test suite" ON)
+if (BUILD_PROJECT_TESTS)
+    add_subdirectory(tests)
+endif ()
+
+option(BUILD_BENCHMARKS "Build Google Benchmark targets" ON)
+if (BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
+endif ()
 
 option(BUILD_PYTHON_BINDINGS "Build Python bindings" ON)
 if (BUILD_PYTHON_BINDINGS)
