@@ -9,6 +9,7 @@
 #include <atomic>
 #include <iostream>
 #include <memory>
+#include <map>
 #include <random>
 #include <thread>
 #include <unordered_map>
@@ -30,8 +31,15 @@ private:
     std::unique_ptr<orderentry::OrderEntryServer> order_server_;
     uint16_t order_entry_port_;
 
-    std::unordered_map<uint64_t, long> client_to_exchange_id_;
-    std::unordered_map<long, std::pair<int, uint64_t> > exchange_to_client_id_; // {fd, client_id}
+    struct ClientOrder {
+        long exchange_order_id;
+        std::string symbol;
+        orderentry::Side side;
+    };
+    // Client order ids are only unique within a client connection.  Keep the
+    // file descriptor in the key so two independent clients may both begin at
+    // client_order_id == 1 without overwriting each other's state.
+    std::map<std::pair<int, uint64_t>, ClientOrder> client_orders_;
 
     std::random_device rd_;
     std::mt19937 generator_;
@@ -60,6 +68,7 @@ private:
     void process_client_order(const orderentry::OrderBuffer& buffer);
     void handle_new_order(const orderentry::OrderBuffer& buffer);
     void handle_cancel_order(const orderentry::OrderBuffer& buffer);
+    void handle_modify_order(const orderentry::OrderBuffer& buffer);
 
     static void send_order_ack(int client_fd, uint64_t client_order_id, long exchange_order_id,
         std::string_view symbol);

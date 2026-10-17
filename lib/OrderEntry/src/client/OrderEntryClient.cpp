@@ -1,7 +1,10 @@
 #include "client/OrderEntryClient.h"
 #include <arpa/inet.h>
+#include <cerrno>
+#include <cstring>
 #include <iostream>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -51,8 +54,10 @@ bool OrderEntryClient::connect(const std::string_view server_address, uint16_t p
 void OrderEntryClient::disconnect()
 {
     if (socket_fd_ >= 0) {
+        shutdown(socket_fd_, SHUT_RDWR);
         close(socket_fd_);
         socket_fd_ = -1;
+        receive_buffer_.clear();
         std::cout << "Disconnected from server" << std::endl;
     }
 }
@@ -101,17 +106,78 @@ bool OrderEntryClient::send_cancel_order(const uint64_t client_order_id, const u
     return send_message(&msg, sizeof(msg));
 }
 
+bool OrderEntryClient::send_client_hello(const uint64_t client_id, const std::string_view client_name)
+{
+    if (!is_connected()) return false;
+
+    ClientHelloMessage message{};
+    message_utils::init_header(message, MessageType::CLIENT_HELLO, sequence_number_++, 0);
+    message.client_id = client_id;
+    const auto copy_len = std::min(client_name.size(), sizeof(message.client_name));
+    std::memcpy(message.client_name, client_name.data(), copy_len);
+    return send_message(&message, sizeof(message));
+}
+
 bool OrderEntryClient::send_message(const void* data, const size_t length)
 {
     if (!is_connected()) return false;
 
-    const ssize_t bytes_sent = send(socket_fd_, data, length, 0);
-    if (bytes_sent < 0) {
-        std::cerr << "Failed to send message" << std::endl;
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    size_t offset = 0;
+    while (offset < length) {
+        const auto sent = send(socket_fd_, bytes + offset, length - offset, MSG_NOSIGNAL);
+        if (sent <= 0) {
+            if (sent < 0 && errno == EINTR) continue;
+            std::cerr << "Failed to send message" << std::endl;
+            disconnect();
+            return false;
+        }
+        offset += static_cast<size_t>(sent);
+    }
+    return true;
+}
+
+bool OrderEntryClient::extract_message(ReceivedMessage& message)
+{
+    if (receive_buffer_.size() < sizeof(MessageHeader)) return false;
+    MessageHeader header{};
+    std::memcpy(&header, receive_buffer_.data(), sizeof(header));
+    const auto type = static_cast<MessageType>(header.message_type);
+    if (!message_utils::is_valid_message_length(type, header.message_length)) {
+        std::cerr << "Received invalid order-entry frame" << std::endl;
+        disconnect();
+        return false;
+    }
+    if (receive_buffer_.size() < header.message_length) return false;
+
+    message.type = type;
+    message.sequence_number = header.sequence_number;
+    message.timestamp_ns = header.timestamp_ns;
+    message.bytes.assign(receive_buffer_.begin(), receive_buffer_.begin() + header.message_length);
+    receive_buffer_.erase(receive_buffer_.begin(), receive_buffer_.begin() + header.message_length);
+    return true;
+}
+
+bool OrderEntryClient::receive_message(ReceivedMessage& message, const int timeout_ms)
+{
+    if (!is_connected()) return false;
+    if (extract_message(message)) return true;
+
+    pollfd descriptor{socket_fd_, POLLIN, 0};
+    const int poll_result = poll(&descriptor, 1, timeout_ms);
+    if (poll_result <= 0) return false;
+    if ((descriptor.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
         disconnect();
         return false;
     }
 
-    return bytes_sent == static_cast<ssize_t>(length);
+    uint8_t buffer[4096];
+    const auto bytes_read = recv(socket_fd_, buffer, sizeof(buffer), 0);
+    if (bytes_read <= 0) {
+        disconnect();
+        return false;
+    }
+    receive_buffer_.insert(receive_buffer_.end(), buffer, buffer + bytes_read);
+    return extract_message(message);
 }
 } // namespace orderentry

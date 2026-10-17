@@ -8,7 +8,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(googletest)
 enable_testing()
 
-add_executable(Tests OrderBookTests.cpp MatchingEngineTests.cpp OrderBookEntryTests.cpp ReliabilitySkeletonTests.cpp)
-target_link_libraries(Tests OrderBook MDFeed GTest::gtest_main)
+add_executable(Tests OrderBookTests.cpp MatchingEngineTests.cpp OrderBookEntryTests.cpp ReliabilitySkeletonTests.cpp OrderEntryNetworkingTests.cpp)
+target_link_libraries(Tests OrderBook MDFeed OrderEntry GTest::gtest_main)
 include(GoogleTest)
 gtest_discover_tests(Tests)

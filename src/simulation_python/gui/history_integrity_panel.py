@@ -1,4 +1,4 @@
-"""Tamper-evident checkpoint verification placeholder."""
+"""Tamper-evident checkpoint results from the reliability experiment."""
 
 from PyQt6.QtWidgets import QFormLayout, QGroupBox, QLabel
 

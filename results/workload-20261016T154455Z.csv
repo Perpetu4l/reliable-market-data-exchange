@@ -1,0 +1,8 @@
+ack_p50_us,ack_p95_us,ack_p99_us,acknowledgements,client_id,configured_clients,duration_seconds,execution_mode,executions,generated,port,rate_per_client,rejected,run_status,seed,sent,server,symbol,timed_out,timestamp_utc
+1145,1319,1457,101,1,7,5.0,local_loopback,0,101,8080,20.0,0,completed,11,101,127.0.0.1,AAPL,0,2026-10-16T15:44:50.298785+00:00
+1192,1320,3009,101,2,7,5.0,local_loopback,101,101,8080,20.0,0,completed,11,101,127.0.0.1,AAPL,0,2026-10-16T15:44:50.298785+00:00
+1153,1341,1512,101,3,7,5.0,local_loopback,0,101,8080,20.0,0,completed,11,101,127.0.0.1,AAPL,0,2026-10-16T15:44:50.298785+00:00
+1197,1315,1548,101,4,7,5.0,local_loopback,100,101,8080,20.0,0,completed,11,101,127.0.0.1,AAPL,0,2026-10-16T15:44:50.298785+00:00
+1180,1321,2443,101,5,7,5.0,local_loopback,0,101,8080,20.0,0,completed,11,101,127.0.0.1,AAPL,0,2026-10-16T15:44:50.298785+00:00
+1208,1315,1355,101,6,7,5.0,local_loopback,101,101,8080,20.0,0,completed,11,101,127.0.0.1,AAPL,0,2026-10-16T15:44:50.298785+00:00
+1208,1317,1406,101,7,7,5.0,local_loopback,0,101,8080,20.0,0,completed,11,101,127.0.0.1,AAPL,0,2026-10-16T15:44:50.298785+00:00

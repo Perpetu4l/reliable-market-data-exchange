@@ -17,9 +17,11 @@ void FaultInjectingFeed::publish(MarketDataEvent event)
     event.feed_id = id_;
     const auto delivered = injector_.apply(event);
     if (delivered.empty()) {
+        last_publish_was_dropped_ = true;
         ++stats_.dropped_packets;
         return;
     }
+    last_publish_was_dropped_ = false;
     for (size_t index = 0; index < delivered.size(); ++index) {
         if (index == 0) ++stats_.delivered_packets;
         else ++stats_.duplicate_packets;

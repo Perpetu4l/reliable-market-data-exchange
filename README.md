@@ -14,14 +14,20 @@ it does **not** provide distributed consensus or replicated order books.
 
 - Limit and market orders, cancellation, modification, and price-time priority.
 - Multiple instruments: `AAPL`, `GOOGL`, `AMZN`, `NFLX`, and `META`.
-- TCP order-entry server and interactive TCP order-entry client.
+- TCP order-entry server and interactive TCP order-entry client with complete
+  stream framing, partial-write handling, and acknowledgement/reject reads.
+- Explicit `CLIENT_HELLO` / `SERVER_WELCOME` connection handshake for the
+  automatic workload client.
+- A separate-process `workload_client` that sends reproducible orders over
+  real TCP sockets and reports client-measured acknowledgement RTT percentiles.
 - UDP multicast publishing of binary price-level, trade, and book-clear
   events, with heartbeat processing. The protocol also defines snapshot message
   types for the reliability layer.
 - UDP multicast receiver with message validation, sequence-gap statistics, and
   logging controls.
 - Lock-free SPSC market-data ring buffer.
-- C++ benchmarks and GoogleTest unit tests.
+- C++ benchmarks and GoogleTest unit tests, including order-entry frame and
+  queue-boundary checks.
 - Optional pybind11 bindings and PyQt6/pyqtgraph market simulator.
 
 ### Reliability demonstration
@@ -40,26 +46,13 @@ target named `reliability_demo`.
 - Bounded snapshot store with retained hash-chain verification.
 - CSV metrics export: loss, duplicates, gaps, recovery counts, recovery
   latency percentiles, snapshot recoveries, and redundancy effectiveness.
-- Structural interfaces for FCFS/Round Robin recovery scheduling and experiment
-  configuration.
+- FCFS and Round Robin recovery scheduling in the deterministic demo, with
+  per-subscriber service counters.
 
-The demonstration intentionally uses local function calls for recovery. It is
-not yet a live TCP recovery server or a second live UDP multicast feed.
-
-## Not implemented yet
-
-These boundaries are important when presenting the project:
-
-- Separate live UDP multicast sockets/endpoints for Feed A and Feed B.
-- Framed TCP recovery networking, authentication, and multi-client service.
-- Recovery scheduler integration into a running TCP server.
-- Real order-book-state extraction and application during snapshot recovery.
-- SHA-256 checkpoint hashing. The current hash-chain implementation uses a
-  deterministic FNV-1a placeholder for demonstration only.
-- Reordering and delay execution in the fault injector; packet loss and
-  duplication are implemented.
-- Live C++ telemetry bindings to the reliability GUI panels.
-- Persistent event history/snapshots and production concurrency tuning.
+The demonstration intentionally keeps recovery in one process so that loss,
+seed, history, snapshot, and scheduling experiments are repeatable. The GUI
+runs this compiled demo and displays its emitted metrics; it is not labelled or
+presented as a live production multicast/recovery deployment.
 
 ## Prerequisites
 
@@ -84,12 +77,18 @@ python3 -m pip install -r src/simulation_python/requirements.txt pybind11
 Use a new build directory. This is especially useful when working from an
 archive that already contains a build cache created on another machine.
 
-### C++ applications, tests, benchmarks, and reliability demo
+### C++ applications and the reliability demo
 
 ```sh
-cmake -S . -B build-local -DBUILD_PYTHON_BINDINGS=OFF
+cmake -S . -B build-local \
+  -DBUILD_PYTHON_BINDINGS=OFF \
+  -DBUILD_PROJECT_TESTS=OFF \
+  -DBUILD_BENCHMARKS=OFF
 cmake --build build-local --parallel
 ```
+
+`build-local` is the directory searched by the GUI for `exchange`,
+`workload_client`, and `reliability_demo`.
 
 ### Optional Python bindings
 
@@ -128,19 +127,25 @@ Python interpreter currently running the GUI.
 
 ## Test the current implementation
 
-### 1. Run all project GoogleTests
+### 1. Build and run all project GoogleTests
 
-This runs the order-book/matching-engine tests and all reliability tests.
+This runs the order-book/matching-engine tests, reliability tests, and the
+order-entry protocol/queue tests.
 
 ```sh
-./build-local/tests/Tests
+cmake -S . -B build-test \
+  -DBUILD_PYTHON_BINDINGS=OFF \
+  -DBUILD_BENCHMARKS=OFF \
+  -DBUILD_PROJECT_TESTS=ON
+cmake --build build-test --target Tests --parallel
+ctest --test-dir build-test --output-on-failure
 ```
 
-Or use CTest for the project test suites only:
+To run only named project suites after building:
 
 ```sh
-ctest --test-dir build-local --output-on-failure -R \
-  '^(OrderBookTests|MatchingEngineTests|OrderBookEntryTests|SequenceTrackerTests|DualFeedSubscriberTests|RecoveryHistoryTests|SnapshotManagerTests|RecoverySchedulerTests|FaultInjectorTests|RedundancyExperimentTests)\.'
+ctest --test-dir build-test --output-on-failure -R \
+  '^(OrderBookTests|MatchingEngineTests|OrderBookEntryTests|SequenceTrackerTests|DualFeedSubscriberTests|RecoveryHistoryTests|SnapshotManagerTests|RecoverySchedulerTests|FaultInjectorTests|RedundancyExperimentTests|OrderEntryProtocolTests|OrderEntryQueueTests)\.'
 ```
 
 The reliability tests verify:
@@ -153,13 +158,6 @@ The reliability tests verify:
 - FCFS and Round Robin scheduler construction;
 - deterministic fault configuration; and
 - redundancy experiment metrics.
-
-To run every CTest registered in the build, including third-party benchmark
-tests, use the following command. It takes longer than the project test suite.
-
-```sh
-ctest --test-dir build-local --output-on-failure
-```
 
 ### 2. Demonstrate independent dual-feed loss and recovery
 
@@ -230,6 +228,8 @@ Available options:
 --seed N
 --history N
 --snapshot-interval N
+--retention N
+--scheduler fcfs|round-robin
 --csv FILE
 ```
 
@@ -287,6 +287,51 @@ cancel 1 AAPL
 quit
 ```
 
+`order_client` waits for and prints the actual acknowledgement, rejection, or
+execution-report frame returned by the exchange. The exchange owns the shared
+order books; clients do not modify them directly.
+
+### Automatic local TCP workload
+
+Start the exchange in one terminal:
+
+```sh
+./build-local/src/exchange --mode client --oe-port 8080
+```
+
+Then start independent client processes in other terminals (or use the
+Exchange Control GUI page, which launches equivalent child processes):
+
+```sh
+./build-local/src/workload_client \
+  --server 127.0.0.1 --port 8080 --client-id 1 \
+  --duration 10 --rate 50 --symbol AAPL --side buy --seed 11
+
+./build-local/src/workload_client \
+  --server 127.0.0.1 --port 8080 --client-id 2 \
+  --duration 10 --rate 50 --symbol AAPL --side sell --seed 12
+```
+
+Each client prints `WORKLOAD_READY` only after the TCP handshake succeeds and
+ends with `WORKLOAD_RESULT`. `ack_p50_us`, `ack_p95_us`, and `ack_p99_us` are
+client-measured request-to-acknowledgement round-trip times in microseconds.
+They are loopback TCP RTTs in local mode, not one-way or physical-network
+latencies.
+
+### Distributed client
+
+Run the exchange on the server machine and replace `127.0.0.1` with that
+machine's reachable IPv4 address when launching `workload_client` elsewhere:
+
+```sh
+./workload_client --server 192.168.1.10 --port 8080 \
+  --client-id 101 --duration 10 --rate 20 --symbol AAPL --side buy --seed 101
+```
+
+The server uses an IPv4 wildcard bind. Allow the selected TCP port through the
+server firewall and use a trusted private network. This project does not add
+authentication or transport encryption.
+
 ### Standalone order-entry protocol test
 
 Terminal 1:
@@ -323,9 +368,99 @@ cd src/simulation_python
 python3 main.py
 ```
 
-The GUI shows price, depth, and volume charts with buy/sell pressure controls.
-It also contains structural reliability dashboard panels. Those panels are not
-yet connected to live reliability-demo metrics.
+The GUI has three clear views:
+
+- **Market Visualisation (local simulator):** the existing in-process price,
+  depth, and volume charts with buy/sell pressure controls. It is not presented
+  as TCP or UDP live data.
+- **Exchange Control:** launches the C++ exchange and independent
+  `workload_client` processes, displays actual process output and workload
+  results, saves completed client rows as CSV under `results/`, previews saved
+  result files in its Previous Results section, provides a manual TCP
+  limit-order form, and documents a remote-client command.
+- **Reliability Experiments:** runs the compiled `reliability_demo` with the
+  selected feed mode, loss rate, seed, event-history capacity, checkpoint
+  interval/retention, and FCFS or Round Robin setting. The **Results** tab
+  shows the actual structured output: loss, duplicate suppression, gaps,
+  replay recovery, feed drops, checkpoint hash, and latency percentiles. Each
+  run writes `results/reliability-*.csv`; its output is also kept in the
+  dashboard log.
+
+For a quick visible demo, open **Reliability Experiments → Configure & Run**,
+choose **Dual feed - independent loss**, set packet loss to `0.20`, leave the
+seed as `42`, then press **Run reliability experiment**. The dashboard changes
+to **Results** automatically when the run completes.
+
+### GUI workflows and what they prove
+
+**Market Visualisation (local simulator)** is an in-process Python/pybind11
+simulation of one AAPL book. Its header explicitly says that it has no TCP
+clients and is not connected to the external exchange or UDP feed. The bid/ask
+chart, depth chart, and volume chart therefore describe local simulated order
+flow only.
+
+**Exchange Control → Local Simulation** is the real local socket workflow:
+
+1. Choose port, client count, rate, duration, symbol, and seed.
+2. Press **Start exchange**, then wait for the green **Ready** state.
+3. Press **Start workload**. Every configured client must become
+   **Connected — workload active** in the status table.
+4. Wait for each client to become **Completed — result recorded**. Only then
+   is a workload CSV written under `results/`.
+5. Use **Stop / clean up** to terminate child processes early. A stopped or
+   failed/incomplete workload is not recorded as a successful result.
+
+**Manual Testing** sends one actual packed `CLIENT_HELLO`, receives a
+`SERVER_WELCOME`, sends `NEW_ORDER`, and displays the returned ACK or reject
+plus client-measured round-trip time. ACK means the exchange accepted the
+order. It does not by itself mean that the order traded; an execution report
+requires a crossing order.
+
+**Distributed Network** is for a workload executable started independently on
+another computer. The GUI does not pretend it can start a remote process.
+
+1. On the exchange machine, run `./build-local/src/exchange --mode client
+   --oe-port 8080`.
+2. Find its reachable private-LAN IPv4 address, for example `ipconfig getifaddr
+   en0` on macOS or `hostname -I` on Linux. Enter that address in the GUI;
+   `192.168.1.10` is not a universal value.
+3. Copy the displayed `workload_client` command and run it from the other
+   machine after building the same project there.
+4. Server output must show the client identity and received orders;
+   `WORKLOAD_READY` proves the handshake and `WORKLOAD_RESULT` proves the
+   client observed responses.
+
+The TCP listener binds to `0.0.0.0` (all IPv4 interfaces). If the client
+cannot connect, check the address, port, both machines' private-network reachability,
+and firewall rules. A process start is not treated as a client connection.
+
+**Previous Results** reads only persisted `workload-*.csv` and
+`reliability-*.csv` files from `results/`; it creates no sample runs. Reliability
+CSVs store the measured metrics plus the run time, seed, mode, loss rate,
+history/snapshot settings, and scheduler for reproducible comparisons.
+
+### Reliability experiment boundaries
+
+The **Reliability Experiments** GUI launches the compiled, deterministic,
+single-process `reliability_demo`. It is a controlled application-level fault
+experiment: Feed A/B delivery is invoked in-process, and configured loss means
+an event is deliberately withheld by the fault injector before subscriber
+delivery. It is not a claim of operating-system or physical-network packet
+loss. The test records actual events produced by that run, including duplicate
+suppression, gaps, replay recovery, snapshot fallback, and latency samples.
+
+The Results page contains two measured charts for the current run:
+
+- **Observed delivery outcome**: source events, per-feed application-level
+  drops, duplicates suppressed, and replayed events.
+- **Observed recovery latency percentiles**: p50/p95/p99 in microseconds. The
+  bars are zero when no recovery occurred; they are not invented samples.
+
+For a meaningful comparison, run a zero-loss baseline and a fault-injected run
+with the same event count, seed, history, snapshot settings, and scheduler.
+Compare the persisted CSVs; deterministic fault decisions are reproducible for
+the same configuration, although the wall-clock throughput measurement can
+vary between runs.
 
 ## Main source layout
 
@@ -336,11 +471,13 @@ lib/MDFeed/include/reliability/   Reliability interfaces and data structures
 lib/MDFeed/src/reliability/       Reliability implementation
 lib/OrderEntry/                   TCP order-entry server and client
 src/exchange/                     Exchange executable
+src/workload_client/              Independent real-TCP automatic workload client
 src/reliability_demo/             Runnable reliability demonstration
 src/simulation_python/            PyQt6 simulator and dashboard structure
 tests/                            GoogleTest test suites
 benchmarks/                       Google Benchmark benchmarks
 docs/RELIABILITY_DEMO.md          Short viva demonstration guide
+docs/IMPLEMENTATION_CHECKLIST.md  Requirement-to-code verification status
 ```
 
 ## Reliability architecture at a glance

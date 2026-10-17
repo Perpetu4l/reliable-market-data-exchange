@@ -50,11 +50,15 @@ public:
     [[nodiscard]] FeedId id() const override { return id_; }
     void publish(MarketDataEvent event) override;
     [[nodiscard]] const FeedDeliveryStats& stats() const { return stats_; }
+    // Result of the most recent publish attempt. This makes experiment metrics
+    // reflect the same sequence event, rather than comparing aggregate counts.
+    [[nodiscard]] bool last_publish_was_dropped() const { return last_publish_was_dropped_; }
 private:
     FeedId id_;
     FaultInjector injector_;
     std::function<void(MarketDataEvent)> sink_;
     FeedDeliveryStats stats_;
+    bool last_publish_was_dropped_{false};
 };
 
 class DualFeedPublisher {

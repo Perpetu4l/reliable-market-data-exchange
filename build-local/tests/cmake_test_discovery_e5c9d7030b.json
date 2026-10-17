@@ -1,5 +1,5 @@
 {
-  "tests": 22,
+  "tests": 24,
   "name": "AllTests",
   "testsuites": [
     {
@@ -157,6 +157,28 @@
           "name": "RecordsDesignLevelMetrics",
           "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/ReliabilitySkeletonTests.cpp",
           "line": 119
+        }
+      ]
+    },
+    {
+      "name": "OrderEntryProtocolTests",
+      "tests": 1,
+      "testsuite": [
+        {
+          "name": "ValidatesExactPackedFrameSizes",
+          "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/OrderEntryNetworkingTests.cpp",
+          "line": 6
+        }
+      ]
+    },
+    {
+      "name": "OrderEntryQueueTests",
+      "tests": 1,
+      "testsuite": [
+        {
+          "name": "PreservesBoundedFifoSemantics",
+          "file": "\/Users\/vaibhavkumar\/Documents\/Codex\/2026-10-05\/you-are-working-on-an-existing\/reliable-market-data-exchange\/tests\/OrderEntryNetworkingTests.cpp",
+          "line": 16
         }
       ]
     }

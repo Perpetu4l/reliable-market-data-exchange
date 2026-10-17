@@ -30,7 +30,11 @@ enum class MessageType : uint16_t {
     MODIFY_ORDER = 3,
     ORDER_ACK = 4,
     ORDER_REJECT = 5,
-    EXECUTION_REPORT = 6
+    EXECUTION_REPORT = 6,
+    // Connection-management messages are deliberately separate from orders.
+    // They let a client identify itself before it starts submitting orders.
+    CLIENT_HELLO = 7,
+    SERVER_WELCOME = 8
 };
 
 enum class Side : uint8_t { BUY = 1, SELL = 2 };
@@ -169,6 +173,21 @@ struct ExecutionReportMessage {
     }
 };
 
+struct ClientHelloMessage {
+    MessageHeader header;
+    uint64_t client_id;
+    char client_name[24];
+    uint8_t reserved[6];
+};
+
+struct ServerWelcomeMessage {
+    MessageHeader header;
+    uint64_t client_id;
+    uint32_t connection_id;
+    char server_name[16];
+    uint8_t reserved[10];
+};
+
 #pragma pack(pop)
 
 namespace message_utils {
@@ -215,8 +234,36 @@ inline std::string_view message_type_to_string(const MessageType type)
         return "ORDER_REJECT";
     case MessageType::EXECUTION_REPORT:
         return "EXECUTION_REPORT";
+    case MessageType::CLIENT_HELLO:
+        return "CLIENT_HELLO";
+    case MessageType::SERVER_WELCOME:
+        return "SERVER_WELCOME";
     default:
         return "UNKNOWN";
+    }
+}
+
+inline bool is_valid_message_length(const MessageType type, const uint32_t length)
+{
+    switch (type) {
+    case MessageType::NEW_ORDER:
+        return length == sizeof(NewOrderMessage);
+    case MessageType::CANCEL_ORDER:
+        return length == sizeof(CancelOrderMessage);
+    case MessageType::MODIFY_ORDER:
+        return length == sizeof(ModifyOrderMessage);
+    case MessageType::ORDER_ACK:
+        return length == sizeof(OrderAckMessage);
+    case MessageType::ORDER_REJECT:
+        return length == sizeof(OrderRejectMessage);
+    case MessageType::EXECUTION_REPORT:
+        return length == sizeof(ExecutionReportMessage);
+    case MessageType::CLIENT_HELLO:
+        return length == sizeof(ClientHelloMessage);
+    case MessageType::SERVER_WELCOME:
+        return length == sizeof(ServerWelcomeMessage);
+    default:
+        return false;
     }
 }
 } // namespace message_utils

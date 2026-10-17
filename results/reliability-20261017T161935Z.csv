@@ -1,0 +1,2 @@
+recorded_at_utc,experiment,mode,events,application_loss_rate,seed,history_capacity,snapshot_interval,snapshot_retention,scheduler,run_status,throughput_eps,packets_sent,packets_lost,duplicates,gaps,recovery_requests,recovered_events,snapshot_recoveries,unrecoverable_gaps,p50_ns,p95_ns,p99_ns,p999_ns,max_ns,redundancy_effectiveness
+2026-10-17T16:19:35.885226+00:00,deterministic_reliability_demo,independent,10000,1.0,43,128,10,8,fcfs,completed,1.14229e+06,10000,20000,0,0,0,0,0,0,0,0,0,0,0,0

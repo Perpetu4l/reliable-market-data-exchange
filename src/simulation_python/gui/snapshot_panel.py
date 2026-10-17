@@ -1,4 +1,4 @@
-"""Snapshot/checkpoint configuration placeholder."""
+"""Snapshot/checkpoint settings for the reliability experiment."""
 
 from PyQt6.QtWidgets import QCheckBox, QFormLayout, QGroupBox, QLabel, QSpinBox
 
@@ -8,10 +8,13 @@ class SnapshotPanel(QGroupBox):
         super().__init__("Snapshots", parent)
         layout = QFormLayout(self)
         self.enabled = QCheckBox()
+        self.enabled.setChecked(True)
         self.interval = QSpinBox()
         self.interval.setRange(0, 1_000_000_000)
+        self.interval.setValue(10)
         self.retention = QSpinBox()
         self.retention.setRange(0, 100_000)
+        self.retention.setValue(8)
         self.status = QLabel("No checkpoint")
         layout.addRow("Enabled", self.enabled)
         layout.addRow("Interval (events)", self.interval)

@@ -1,0 +1,6 @@
+ack_p50_us,ack_p95_us,ack_p99_us,acknowledgements,client_id,configured_clients,duration_seconds,execution_mode,executions,generated,port,rate_per_client,rejected,run_status,seed,sent,server,symbol,timed_out,timestamp_utc
+1285,1320,1358,89,1,5,4.0,local_loopback,0,89,8080,22.0,0,completed,13,89,127.0.0.1,GOOGL,0,2026-10-16T14:59:26.096402+00:00
+1294,1312,1332,89,2,5,4.0,local_loopback,88,89,8080,22.0,0,completed,13,89,127.0.0.1,GOOGL,0,2026-10-16T14:59:26.096402+00:00
+1258,1319,1400,89,5,5,4.0,local_loopback,0,89,8080,22.0,0,completed,13,89,127.0.0.1,GOOGL,0,2026-10-16T14:59:26.096402+00:00
+1232,1298,1328,89,4,5,4.0,local_loopback,88,89,8080,22.0,0,completed,13,89,127.0.0.1,GOOGL,0,2026-10-16T14:59:26.096402+00:00
+1210,1308,1327,89,3,5,4.0,local_loopback,0,89,8080,22.0,0,completed,13,89,127.0.0.1,GOOGL,0,2026-10-16T14:59:26.096402+00:00

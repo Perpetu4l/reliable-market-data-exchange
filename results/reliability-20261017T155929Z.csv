@@ -1,0 +1,2 @@
+throughput_eps,packets_sent,packets_lost,duplicates,gaps,recovery_requests,recovered_events,snapshot_recoveries,unrecoverable_gaps,p50_ns,p95_ns,p99_ns,p999_ns,max_ns,redundancy_effectiveness
+251651,100,7,99,6,6,7,0,0,2458,3125,3125,3125,15542,0

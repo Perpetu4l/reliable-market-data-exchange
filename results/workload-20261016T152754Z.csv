@@ -1,0 +1,3 @@
+ack_p50_us,ack_p95_us,ack_p99_us,acknowledgements,client_id,configured_clients,duration_seconds,execution_mode,executions,generated,port,rate_per_client,rejected,run_status,seed,sent,server,symbol,timed_out,timestamp_utc
+1294,1310,1317,101,1,2,5.0,local_loopback,16,101,8080,20.0,0,completed,11,101,127.0.0.1,AAPL,0,2026-10-16T15:27:49.206841+00:00
+1219,1302,1312,101,2,2,5.0,local_loopback,84,101,8080,20.0,0,completed,11,101,127.0.0.1,AAPL,0,2026-10-16T15:27:49.206841+00:00

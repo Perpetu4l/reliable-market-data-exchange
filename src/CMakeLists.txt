@@ -16,5 +16,10 @@ target_link_libraries(order_server OrderEntry)
 add_executable(order_client order_client/main.cpp)
 target_link_libraries(order_client OrderEntry)
 
+# Independent automatic order generator.  This is intentionally a separate
+# process from the exchange so local benchmarks still use real TCP sockets.
+add_executable(workload_client workload_client/main.cpp)
+target_link_libraries(workload_client OrderEntry)
+
 add_executable(reliability_demo reliability_demo/main.cpp)
 target_link_libraries(reliability_demo MDFeed)

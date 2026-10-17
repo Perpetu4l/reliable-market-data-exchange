@@ -1,5 +1,6 @@
 #include "client/OrderEntryClient.h"
 #include <chrono>
+#include <cstring>
 #include <iostream>
 //#include <random>
 #include <sstream>
@@ -12,6 +13,37 @@ void print_usage(const char* program_name)
     std::cout << "  --server <address>    Server address (default: 127.0.0.1)" << std::endl;
     std::cout << "  --port <port>         Server port (default: 8080)" << std::endl;
     std::cout << "  --help, -h            Show this help message" << std::endl;
+}
+
+void print_server_response(orderentry::OrderEntryClient& client)
+{
+    orderentry::OrderEntryClient::ReceivedMessage response;
+    if (!client.receive_message(response, 2000)) {
+        std::cout << "No server response within 2 seconds" << std::endl;
+        return;
+    }
+
+    if (response.type == orderentry::MessageType::ORDER_ACK
+        && response.bytes.size() == sizeof(orderentry::OrderAckMessage)) {
+        orderentry::OrderAckMessage message{};
+        std::memcpy(&message, response.bytes.data(), sizeof(message));
+        std::cout << "Received " << message.toDebugString() << std::endl;
+    }
+    else if (response.type == orderentry::MessageType::ORDER_REJECT
+             && response.bytes.size() == sizeof(orderentry::OrderRejectMessage)) {
+        orderentry::OrderRejectMessage message{};
+        std::memcpy(&message, response.bytes.data(), sizeof(message));
+        std::cout << "Received " << message.toDebugString() << std::endl;
+    }
+    else if (response.type == orderentry::MessageType::EXECUTION_REPORT
+             && response.bytes.size() == sizeof(orderentry::ExecutionReportMessage)) {
+        orderentry::ExecutionReportMessage message{};
+        std::memcpy(&message, response.bytes.data(), sizeof(message));
+        std::cout << "Received " << message.toDebugString() << std::endl;
+    }
+    else {
+        std::cout << "Received " << orderentry::message_utils::message_type_to_string(response.type) << std::endl;
+    }
 }
 
 void interactive_mode(orderentry::OrderEntryClient& client)
@@ -56,6 +88,7 @@ void interactive_mode(orderentry::OrderEntryClient& client)
                         << ", symbol=" << symbol << ", side=" << side_str
                         << ", price=$" << price << ", qty=" << quantity
                         << std::endl;
+                print_server_response(client);
                 next_order_id++;
             }
             else {
@@ -75,6 +108,7 @@ void interactive_mode(orderentry::OrderEntryClient& client)
                 std::cout << "Sent CANCEL_ORDER: cancel_id=" << next_order_id
                         << ", original_id=" << order_id
                         << ", symbol=" << symbol << std::endl;
+                print_server_response(client);
                 next_order_id++;
             }
             else {

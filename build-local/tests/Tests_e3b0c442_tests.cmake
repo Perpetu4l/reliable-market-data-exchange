@@ -196,4 +196,22 @@ set_tests_properties([=[RedundancyExperimentTests.RecordsDesignLevelMetrics]=]
     SKIP_REGULAR_EXPRESSION [==[\[  SKIPPED \]]==]
     
 )
-set(Tests_TESTS [==[OrderBookTests.OrderBookInitialisesCorrectly]==] [==[OrderBookTests.CanAddBids]==] [==[OrderBookTests.CanAddAsks]==] [==[OrderBookTests.CanAddBidsSameLevel]==] [==[OrderBookTests.CanGetBidAskSpread]==] [==[OrderBookTests.CanCancelBids]==] [==[OrderBookTests.CanModifyBids]==] [==[OrderBookTests.CanMatch]==] [==[OrderBookTests.CanMatchCrossedSpreadEqualQuantity]==] [==[OrderBookTests.CanMatchCrossedSpreadMoreBids]==] [==[OrderBookTests.CanMatchCrossedSpreadMoreAsks]==] [==[OrderBookTests.DoesntMatchInsufficientBids]==] [==[OrderBookTests.OrderBookEntry]==] [==[SequenceTrackerTests.DetectsGapAndDuplicate]==] [==[RecoveryHistoryTests.RejectsRangeOutsideBoundedHistory]==] [==[DualFeedSubscriberTests.ReplaysGapBeforeBufferedLaterEvent]==] [==[DualFeedSubscriberTests.SnapshotResyncReleasesLaterBufferedEvent]==] [==[SnapshotManagerTests.CreatesVerifiableHashChain]==] [==[SnapshotManagerTests.VerifiesTheRetainedSegmentOfAHashChain]==] [==[RecoverySchedulerTests.CanInstantiateBothPolicies]==] [==[FaultInjectorTests.UsesSeededConfiguration]==] [==[RedundancyExperimentTests.RecordsDesignLevelMetrics]==])
+add_test([=[OrderEntryProtocolTests.ValidatesExactPackedFrameSizes]=]  /Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build-local/tests/Tests [==[--gtest_filter=OrderEntryProtocolTests.ValidatesExactPackedFrameSizes]==] --gtest_also_run_disabled_tests)
+set_tests_properties([=[OrderEntryProtocolTests.ValidatesExactPackedFrameSizes]=]
+  PROPERTIES
+    
+    DEF_SOURCE_LINE [==[/Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/tests/OrderEntryNetworkingTests.cpp:6]==]
+    WORKING_DIRECTORY [==[/Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build-local/tests]==]
+    SKIP_REGULAR_EXPRESSION [==[\[  SKIPPED \]]==]
+    
+)
+add_test([=[OrderEntryQueueTests.PreservesBoundedFifoSemantics]=]  /Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build-local/tests/Tests [==[--gtest_filter=OrderEntryQueueTests.PreservesBoundedFifoSemantics]==] --gtest_also_run_disabled_tests)
+set_tests_properties([=[OrderEntryQueueTests.PreservesBoundedFifoSemantics]=]
+  PROPERTIES
+    
+    DEF_SOURCE_LINE [==[/Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/tests/OrderEntryNetworkingTests.cpp:16]==]
+    WORKING_DIRECTORY [==[/Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build-local/tests]==]
+    SKIP_REGULAR_EXPRESSION [==[\[  SKIPPED \]]==]
+    
+)
+set(Tests_TESTS [==[OrderBookTests.OrderBookInitialisesCorrectly]==] [==[OrderBookTests.CanAddBids]==] [==[OrderBookTests.CanAddAsks]==] [==[OrderBookTests.CanAddBidsSameLevel]==] [==[OrderBookTests.CanGetBidAskSpread]==] [==[OrderBookTests.CanCancelBids]==] [==[OrderBookTests.CanModifyBids]==] [==[OrderBookTests.CanMatch]==] [==[OrderBookTests.CanMatchCrossedSpreadEqualQuantity]==] [==[OrderBookTests.CanMatchCrossedSpreadMoreBids]==] [==[OrderBookTests.CanMatchCrossedSpreadMoreAsks]==] [==[OrderBookTests.DoesntMatchInsufficientBids]==] [==[OrderBookTests.OrderBookEntry]==] [==[SequenceTrackerTests.DetectsGapAndDuplicate]==] [==[RecoveryHistoryTests.RejectsRangeOutsideBoundedHistory]==] [==[DualFeedSubscriberTests.ReplaysGapBeforeBufferedLaterEvent]==] [==[DualFeedSubscriberTests.SnapshotResyncReleasesLaterBufferedEvent]==] [==[SnapshotManagerTests.CreatesVerifiableHashChain]==] [==[SnapshotManagerTests.VerifiesTheRetainedSegmentOfAHashChain]==] [==[RecoverySchedulerTests.CanInstantiateBothPolicies]==] [==[FaultInjectorTests.UsesSeededConfiguration]==] [==[RedundancyExperimentTests.RecordsDesignLevelMetrics]==] [==[OrderEntryProtocolTests.ValidatesExactPackedFrameSizes]==] [==[OrderEntryQueueTests.PreservesBoundedFifoSemantics]==])

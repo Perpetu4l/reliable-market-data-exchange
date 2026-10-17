@@ -1,4 +1,4 @@
-"""Shared recovery scheduler comparison placeholder."""
+"""Scheduler selected by the reliability experiment."""
 
 from PyQt6.QtWidgets import QComboBox, QFormLayout, QGroupBox, QLabel
 
@@ -10,7 +10,7 @@ class FairnessPanel(QGroupBox):
         self.policy = QComboBox()
         self.policy.addItems(["FCFS", "Round Robin"])
         self.waiting_time = QLabel("—")
-        self.service_distribution = QLabel("No requests")
+        self.service_distribution = QLabel("No run yet")
         layout.addRow("Scheduling policy", self.policy)
         layout.addRow("Waiting time", self.waiting_time)
         layout.addRow("Service distribution", self.service_distribution)

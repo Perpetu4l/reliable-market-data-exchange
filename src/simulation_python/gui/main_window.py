@@ -6,10 +6,10 @@ from pathlib import Path
 from typing import Deque
 
 import pyqtgraph as pg
-from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                             QPushButton, QLabel, QGridLayout, QDockWidget)
+                             QPushButton, QLabel, QGridLayout, QTabWidget)
 
 # Allow the GUI module to be imported directly (for tests or tools) as well as
 # through main.py. The local pybind11 modules are built into <repo>/orderbook.
@@ -20,6 +20,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
 import orderbook
 from market_simulator import MarketSimulator
 from gui.reliability_dashboard import ReliabilityDashboard
+from gui.exchange_control_panel import ExchangeControlPanel
 
 LINE_WIDTH = 4
 COLOUR_RED = (255, 40, 40)
@@ -35,7 +36,7 @@ MAX_RENDERED_DEPTHS = 15
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Market Simulation")
+        self.setWindowTitle("Market Exchange Simulation and Benchmarking")
         self.setGeometry(100, 100, 1600, 1000)
 
         self.max_history = MAX_AGE_SECONDS * FRAME_RATE
@@ -45,7 +46,6 @@ class MainWindow(QMainWindow):
         self.volume_data: Deque[float] = deque(maxlen=self.max_history)
 
         self.setup_ui()
-        self._setup_reliability_dashboard()
 
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self.update_data)
@@ -82,8 +82,9 @@ class MainWindow(QMainWindow):
             self.order_book.add_order(ask_order)
 
     def setup_ui(self):
+        tabs = QTabWidget()
+        self.setCentralWidget(tabs)
         central_widget = QWidget()
-        self.setCentralWidget(central_widget)
         main_layout = QGridLayout(central_widget)
 
         self.setup_price_chart()
@@ -101,14 +102,11 @@ class MainWindow(QMainWindow):
 
         main_layout.setRowStretch(0, 3)
         main_layout.setRowStretch(1, 1)
-
-    def _setup_reliability_dashboard(self):
-        """Keep the established charts intact and add the new dashboard as a dock."""
+        tabs.addTab(central_widget, "Market Visualisation (local simulator)")
+        self.exchange_control = ExchangeControlPanel(self)
+        tabs.addTab(self.exchange_control, "Exchange Control")
         self.reliability_dashboard = ReliabilityDashboard(self)
-        dock = QDockWidget("Reliability & experiments (design skeleton)", self)
-        dock.setWidget(self.reliability_dashboard)
-        dock.setMinimumWidth(320)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+        tabs.addTab(self.reliability_dashboard, "Reliability Experiments")
 
     def setup_price_chart(self):
         self.price_chart = pg.PlotWidget(title="Price (USD)")
@@ -149,6 +147,17 @@ class MainWindow(QMainWindow):
     def setup_controls(self):
         self.controls_widget = QWidget()
         layout = QVBoxLayout(self.controls_widget)
+        scope = QLabel(
+            "Local simulator status\n"
+            "Instance: in-process AAPL order book (Security ID 1)\n"
+            "Transport: none — this tab is not the TCP exchange or UDP feed\n"
+            "External clients: none\n"
+            "Activity: starting…"
+        )
+        scope.setWordWrap(True)
+        scope.setStyleSheet("padding: 8px; border: 1px solid #888; border-radius: 4px;")
+        self.simulator_scope_label = scope
+        layout.addWidget(scope)
         button_layout = QHBoxLayout()
 
         self.buy_button = QPushButton("Add Buy Pressure")
@@ -298,6 +307,13 @@ class MainWindow(QMainWindow):
 
         self.bid_depth_label.setText(f"Best Bid Depth: {bid_depth}")
         self.ask_depth_label.setText(f"Best Ask Depth: {ask_depth}")
+        self.simulator_scope_label.setText(
+            "Local simulator status\n"
+            "Instance: in-process AAPL order book (Security ID 1)\n"
+            "Transport: none — not connected to the TCP exchange or UDP feed\n"
+            "External clients: none\n"
+            f"Activity: {order_count} resting order(s), {self.order_book.get_orders_matched()} matched unit(s)"
+        )
 
     def on_buy_pressure(self):
         self.market_simulator.add_buy_pressure()
@@ -307,4 +323,6 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self.market_simulator.stop_simulation()
+        self.exchange_control.shutdown()
+        self.reliability_dashboard.shutdown()
         event.accept()

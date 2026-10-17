@@ -1,4 +1,4 @@
-"""Telemetry view placeholder for future pybind11-backed metric snapshots."""
+"""Measured metrics from the compiled reliability experiment."""
 
 from PyQt6.QtWidgets import QFormLayout, QGroupBox, QLabel
 

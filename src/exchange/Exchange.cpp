@@ -207,6 +207,9 @@ void Exchange::process_client_order(const orderentry::OrderBuffer& buffer)
         case orderentry::MessageType::CANCEL_ORDER:
             handle_cancel_order(buffer);
             break;
+        case orderentry::MessageType::MODIFY_ORDER:
+            handle_modify_order(buffer);
+            break;
         default:
             std::cerr << "Unsupported message type: " << header->message_type << std::endl;
             break;
@@ -233,6 +236,11 @@ void Exchange::handle_new_order(const orderentry::OrderBuffer& buffer)
         return;
     }
 
+    if (msg->quantity == 0 || (msg->order_type == orderentry::OrderType::LIMIT && msg->price == 0)) {
+        send_order_reject(buffer.client_fd, msg->client_order_id, 6, "Invalid order");
+        return;
+    }
+
     const auto order_book = symbol_manager_->get_order_book(symbol);
     const auto symbol_id = symbol_manager_->get_symbol_id(symbol);
 
@@ -245,8 +253,16 @@ void Exchange::handle_new_order(const orderentry::OrderBuffer& buffer)
     const OrderCore core(username, *symbol_id);
     const Order order(core, msg->price, msg->quantity, msg->side == orderentry::Side::BUY);
 
-    client_to_exchange_id_[msg->client_order_id] = order.OrderId();
-    exchange_to_client_id_[order.OrderId()] = {buffer.client_fd, msg->client_order_id};
+    // Capture the best resting price before matching removes the level. This
+    // permits the incoming client to receive an execution report for the
+    // common one-level case; the order-book API does not yet expose a full
+    // per-fill execution ledger for reporting every resting counterparty.
+    const auto potential_execution_price = msg->side == orderentry::Side::BUY
+        ? order_book->GetBestAskPrice()
+        : order_book->GetBestBidPrice();
+
+    client_orders_[{buffer.client_fd, msg->client_order_id}] = {
+        order.OrderId(), symbol, msg->side};
 
     send_order_ack(buffer.client_fd, msg->client_order_id, order.OrderId(), symbol);
 
@@ -256,13 +272,9 @@ void Exchange::handle_new_order(const orderentry::OrderBuffer& buffer)
     if (const uint64_t new_matched = order_book->GetOrdersMatched();
         new_matched > old_matched) {
         const uint64_t executed_qty = new_matched - old_matched;
-        auto best_price = msg->side == orderentry::Side::BUY
-                              ? order_book->GetBestAskPrice()
-                              : order_book->GetBestBidPrice();
-
-        if (best_price.has_value()) {
+        if (potential_execution_price.has_value()) {
             send_execution_report(buffer.client_fd, msg->client_order_id,
-                order.OrderId(), best_price.value(),
+                order.OrderId(), potential_execution_price.value(),
                 executed_qty, order.CurrentQuantity(),
                 msg->side);
         }
@@ -276,13 +288,13 @@ void Exchange::handle_cancel_order(const orderentry::OrderBuffer& buffer)
     std::cout << "[CLIENT] Cancel order: " << msg->client_order_id
             << " (original: " << msg->original_client_order_id << ")" << std::endl;
 
-    const auto it = client_to_exchange_id_.find(msg->original_client_order_id);
-    if (it == client_to_exchange_id_.end()) {
+    const auto it = client_orders_.find({buffer.client_fd, msg->original_client_order_id});
+    if (it == client_orders_.end()) {
         send_order_reject(buffer.client_fd, msg->client_order_id, 3, "Order not found"); // TODO, use reject enum
         return;
     }
 
-    const long exchange_order_id = it->second;
+    const long exchange_order_id = it->second.exchange_order_id;
     const std::string symbol(msg->symbol, strnlen(msg->symbol, sizeof(msg->symbol)));
 
     const auto order_book = symbol_manager_->get_order_book(symbol);
@@ -294,14 +306,48 @@ void Exchange::handle_cancel_order(const orderentry::OrderBuffer& buffer)
     try {
         order_book->RemoveOrder(exchange_order_id);
 
-        client_to_exchange_id_.erase(msg->original_client_order_id);
-        exchange_to_client_id_.erase(exchange_order_id);
+        client_orders_.erase(it);
 
         send_order_ack(buffer.client_fd, msg->client_order_id, exchange_order_id, symbol);
         std::cout << "Order " << msg->original_client_order_id << " cancelled successfully" << std::endl;
     }
     catch (const std::exception& e) {
         send_order_reject(buffer.client_fd, msg->client_order_id, 5, "Cancel failed");
+    }
+}
+
+void Exchange::handle_modify_order(const orderentry::OrderBuffer& buffer)
+{
+    const auto* msg = buffer.as<orderentry::ModifyOrderMessage>();
+    const auto original = client_orders_.find({buffer.client_fd, msg->original_client_order_id});
+    if (original == client_orders_.end()) {
+        send_order_reject(buffer.client_fd, msg->client_order_id, 3, "Order not found");
+        return;
+    }
+    if (msg->new_price == 0 || msg->new_quantity == 0) {
+        send_order_reject(buffer.client_fd, msg->client_order_id, 6, "Invalid order");
+        return;
+    }
+
+    const auto& original_order = original->second;
+    const auto order_book = symbol_manager_->get_order_book(original_order.symbol);
+    const auto symbol_id = symbol_manager_->get_symbol_id(original_order.symbol);
+    if (!order_book || !symbol_id) {
+        send_order_reject(buffer.client_fd, msg->client_order_id, 2, "Internal error");
+        return;
+    }
+
+    try {
+        const Order amended(OrderCore("client_" + std::to_string(buffer.client_fd), *symbol_id),
+            msg->new_price, msg->new_quantity, original_order.side == orderentry::Side::BUY);
+        order_book->AmendOrder(original_order.exchange_order_id, amended);
+        client_orders_.erase(original);
+        client_orders_[{buffer.client_fd, msg->client_order_id}] = {
+            amended.OrderId(), original_order.symbol, original_order.side};
+        send_order_ack(buffer.client_fd, msg->client_order_id, amended.OrderId(), original_order.symbol);
+    }
+    catch (const std::exception&) {
+        send_order_reject(buffer.client_fd, msg->client_order_id, 7, "Modify failed");
     }
 }
 
@@ -365,8 +411,15 @@ void Exchange::send_execution_report(const int client_fd,
 
 void Exchange::send_response(const int client_fd, const void* data, const size_t length)
 {
-    if (const ssize_t sent = send(client_fd, data, length, MSG_NOSIGNAL); sent < 0) {
-        std::cerr << "Failed to send response to client " << client_fd << std::endl;
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    size_t offset = 0;
+    while (offset < length) {
+        const auto sent = send(client_fd, bytes + offset, length - offset, MSG_NOSIGNAL);
+        if (sent <= 0) {
+            std::cerr << "Failed to send response to client " << client_fd << std::endl;
+            return;
+        }
+        offset += static_cast<size_t>(sent);
     }
 }
 
@@ -389,9 +442,11 @@ void Exchange::print_final_stats() const
     std::cout << "Market Data Send failures: " << stats.send_failures << std::endl;
 
     if (order_server_) {
-        auto [orders_received, connections] = order_server_->get_stats();
-        std::cout << "Order Entry Orders received: " << orders_received << std::endl;
-        std::cout << "Order Entry Total connections: " << connections << std::endl;
+        const auto stats = order_server_->get_stats();
+        std::cout << "Order Entry Orders received: " << stats.orders_received << std::endl;
+        std::cout << "Order Entry Total connections: " << stats.connections << std::endl;
+        std::cout << "Order Entry malformed frames: " << stats.malformed_messages << std::endl;
+        std::cout << "Order Entry queue overflows: " << stats.queue_overflows << std::endl;
     }
 
     for (const auto symbols = symbol_manager_->get_all_symbols();

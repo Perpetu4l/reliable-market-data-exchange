@@ -1,6 +1,7 @@
 #include "reliability/DualFeed.h"
 #include "reliability/Metrics.h"
 #include "reliability/RecoveryProtocol.h"
+#include "reliability/RecoveryScheduler.h"
 
 #include <chrono>
 #include <cstdlib>
@@ -18,6 +19,8 @@ struct DemoConfig {
     uint64_t seed{42};
     size_t history_size{128};
     uint64_t snapshot_interval{10};
+    size_t snapshot_retention{8};
+    std::string scheduler{"fcfs"};
     std::string mode{"independent"};
     std::string csv_path;
 };
@@ -26,7 +29,8 @@ void print_usage(const char* program)
 {
     std::cout << "Usage: " << program
               << " [--events N] [--loss RATE] [--mode single|independent|correlated]"
-                 " [--seed N] [--history N] [--snapshot-interval N] [--csv FILE]\n";
+                 " [--seed N] [--history N] [--snapshot-interval N] [--retention N]"
+                 " [--scheduler fcfs|round-robin] [--csv FILE]\n";
 }
 
 bool parse_arguments(const int argc, char* argv[], DemoConfig& config)
@@ -45,11 +49,14 @@ bool parse_arguments(const int argc, char* argv[], DemoConfig& config)
         else if (argument == "--seed") config.seed = std::stoull(value);
         else if (argument == "--history") config.history_size = std::stoull(value);
         else if (argument == "--snapshot-interval") config.snapshot_interval = std::stoull(value);
+        else if (argument == "--retention") config.snapshot_retention = std::stoull(value);
+        else if (argument == "--scheduler") config.scheduler = value;
         else if (argument == "--csv") config.csv_path = value;
         else return false;
     }
     return config.loss_rate >= 0.0 && config.loss_rate <= 1.0
-        && (config.mode == "single" || config.mode == "independent" || config.mode == "correlated");
+        && (config.mode == "single" || config.mode == "independent" || config.mode == "correlated")
+        && (config.scheduler == "fcfs" || config.scheduler == "round-robin");
 }
 
 MarketDataEvent make_event(const uint64_t sequence)
@@ -74,13 +81,16 @@ int main(int argc, char* argv[])
 
     auto history = std::make_shared<RecoveryHistory>(config.history_size);
     auto snapshots = std::make_shared<SnapshotManager>(SnapshotConfig{
-        config.snapshot_interval, 8, config.snapshot_interval != 0});
+        config.snapshot_interval, config.snapshot_retention, config.snapshot_interval != 0});
     RecoveryServer recovery_server(history, snapshots);
     RecoveryClient recovery_client("demo-subscriber");
+    RecoveryScheduler scheduler(config.scheduler == "round-robin"
+        ? SchedulingPolicy::ROUND_ROBIN : SchedulingPolicy::FCFS);
     MetricsCollector metrics;
     std::unique_ptr<DualFeedSubscriber> subscriber;
 
     uint64_t delivered_events = 0;
+    uint64_t gaps_avoided_by_second_feed = 0;
     subscriber = std::make_unique<DualFeedSubscriber>(
         [&](const MarketDataEvent& event) {
             ++delivered_events;
@@ -89,7 +99,10 @@ int main(int argc, char* argv[])
         },
         [&](const MissingRange range) {
             const auto recovery_started = std::chrono::steady_clock::now();
-            auto response = recovery_client.recover(recovery_server, range);
+            scheduler.enqueue({"demo-subscriber", range});
+            const auto scheduled = scheduler.next();
+            if (!scheduled.has_value()) return;
+            auto response = recovery_client.recover(recovery_server, scheduled->request.missing_range);
             const auto latency = std::chrono::duration_cast<std::chrono::nanoseconds>(
                 std::chrono::steady_clock::now() - recovery_started).count();
             auto& values = metrics.mutable_metrics();
@@ -98,6 +111,7 @@ int main(int argc, char* argv[])
             metrics.record_recovery_latency(latency);
 
             if (response.status == RecoveryStatus::OK) {
+                scheduler.record_completed(*scheduled, response.events.size());
                 values.recovered_events += response.events.size();
                 std::cout << "RECOVERY OK range=" << range.start_sequence << '-' << range.end_sequence
                           << " events=" << response.events.size() << '\n';
@@ -107,11 +121,13 @@ int main(int argc, char* argv[])
 
             const auto snapshot_response = recovery_server.send_snapshot(range.end_sequence);
             if (snapshot_response.status == RecoveryStatus::OK) {
+                scheduler.record_completed(*scheduled, 0);
                 ++values.snapshot_recoveries;
                 std::cout << "RECOVERY SNAPSHOT RESYNC checkpoint="
                           << snapshot_response.snapshot->sequence_number << '\n';
                 subscriber->resynchronise_after_snapshot(snapshot_response.snapshot->sequence_number);
             } else {
+                scheduler.record_completed(*scheduled, 0);
                 ++values.unrecoverable_gaps;
                 std::cout << "RECOVERY UNAVAILABLE range=" << range.start_sequence << '-'
                           << range.end_sequence << '\n';
@@ -137,6 +153,7 @@ int main(int argc, char* argv[])
               << " events=" << config.event_count << " loss=" << config.loss_rate
               << " seed=" << config.seed << "\n";
 
+    const auto experiment_started = std::chrono::steady_clock::now();
     for (uint64_t sequence = 1; sequence <= config.event_count; ++sequence) {
         auto event = make_event(sequence);
         history->append(event);
@@ -151,21 +168,35 @@ int main(int argc, char* argv[])
             continue;
         }
         publisher.publish(event);
+        // A is the single-feed baseline. If it lost this exact sequence while
+        // B delivered it, the second feed avoided a would-be single-feed gap.
+        if (feed_b && feed_a->last_publish_was_dropped()
+            && !feed_b->last_publish_was_dropped()) {
+            ++gaps_avoided_by_second_feed;
+        }
     }
 
     auto result = metrics.snapshot();
+    const auto elapsed_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - experiment_started).count();
+    result.throughput_events_per_second = elapsed_seconds > 0.0
+        ? static_cast<double>(config.event_count) / elapsed_seconds : 0.0;
     result.duplicate_count = subscriber->sequence_tracker().duplicate_count();
     const auto feed_a_stats = feed_a->stats();
     result.packets_lost += feed_a_stats.dropped_packets;
     if (feed_b) {
         const auto feed_b_stats = feed_b->stats();
         result.packets_lost += feed_b_stats.dropped_packets;
-        const auto potential_single_feed_gaps = feed_a_stats.dropped_packets;
-        const auto dual_losses = std::min(feed_a_stats.dropped_packets, feed_b_stats.dropped_packets);
-        result.redundancy_effectiveness = potential_single_feed_gaps == 0 ? 0.0
-            : static_cast<double>(potential_single_feed_gaps - dual_losses)
-                / static_cast<double>(potential_single_feed_gaps);
+        result.redundancy_effectiveness = feed_a_stats.dropped_packets == 0 ? 0.0
+            : static_cast<double>(gaps_avoided_by_second_feed)
+                / static_cast<double>(feed_a_stats.dropped_packets);
     }
+
+    const auto latest_snapshot = snapshots->get_latest_snapshot();
+    const bool checkpoint_chain_valid = snapshots->verify_snapshots();
+    const auto& scheduler_metrics = scheduler.metrics();
+    const auto service_it = scheduler_metrics.per_subscriber_service_distribution.find("demo-subscriber");
+    const auto demo_subscriber_services = service_it == scheduler_metrics.per_subscriber_service_distribution.end()
+        ? 0 : service_it->second;
 
     std::cout << "\nSUMMARY\n"
               << "  delivered events: " << delivered_events << '\n'
@@ -179,7 +210,7 @@ int main(int argc, char* argv[])
               << "  feed B dropped packets: " << (feed_b ? feed_b->stats().dropped_packets : 0) << '\n'
               << "  simulated loss count: " << result.packets_lost << '\n'
               << "  redundancy effectiveness: " << result.redundancy_effectiveness << '\n'
-              << "  checkpoint chain valid: " << (snapshots->verify_snapshots() ? "yes" : "no") << '\n';
+              << "  checkpoint chain valid: " << (checkpoint_chain_valid ? "yes" : "no") << '\n';
 
     if (!config.csv_path.empty()) {
         if (!MetricsExporter{}.export_csv(result, config.csv_path)) {
@@ -188,5 +219,36 @@ int main(int argc, char* argv[])
         }
         std::cout << "  CSV written: " << config.csv_path << '\n';
     }
+
+    // Stable one-line output consumed by the GUI. The values come from this
+    // deterministic in-process experiment, not live UDP/TCP recovery sockets.
+    std::cout << "RELIABILITY_RESULT"
+              << " mode=" << config.mode
+              << " events=" << config.event_count
+              << " loss=" << config.loss_rate
+              << " packets_sent=" << result.packets_sent
+              << " packets_lost=" << result.packets_lost
+              << " duplicates=" << result.duplicate_count
+              << " gaps=" << result.gap_count
+              << " recovery_requests=" << result.recovery_request_count
+              << " recovered_events=" << result.recovered_events
+              << " snapshot_recoveries=" << result.snapshot_recoveries
+              << " unrecoverable_gaps=" << result.unrecoverable_gaps
+              << " feed_a_dropped=" << feed_a_stats.dropped_packets
+              << " feed_b_dropped=" << (feed_b ? feed_b->stats().dropped_packets : 0)
+              << " gaps_avoided=" << gaps_avoided_by_second_feed
+              << " redundancy_effectiveness=" << result.redundancy_effectiveness
+              << " throughput_eps=" << result.throughput_events_per_second
+              << " p50_ns=" << result.recovery_latency.p50_ns
+              << " p95_ns=" << result.recovery_latency.p95_ns
+              << " p99_ns=" << result.recovery_latency.p99_ns
+              << " scheduler=" << config.scheduler
+              << " scheduler_requests=" << scheduler_metrics.recovery_request_count
+              << " scheduler_messages=" << scheduler_metrics.messages_recovered
+              << " scheduler_demo_subscriber=" << demo_subscriber_services
+              << " checkpoint_sequence=" << (latest_snapshot ? latest_snapshot->sequence_number : 0)
+              << " checkpoint_hash=" << (latest_snapshot ? latest_snapshot->hash : "none")
+              << " chain_valid=" << (checkpoint_chain_valid ? 1 : 0)
+              << '\n';
     return EXIT_SUCCESS;
 }
