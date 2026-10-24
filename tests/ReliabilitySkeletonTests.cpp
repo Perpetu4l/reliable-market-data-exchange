@@ -195,6 +195,17 @@ TEST(RecoverySchedulerTests, CanInstantiateBothPolicies)
     EXPECT_TRUE(round_robin.next().has_value());
 }
 
+TEST(RecoverySchedulerTests, RoundRobinAlternatesSubscribersUnderContention)
+{
+    RecoveryScheduler scheduler(SchedulingPolicy::ROUND_ROBIN);
+    scheduler.enqueue({"noisy", {1, 1}});
+    scheduler.enqueue({"noisy", {2, 2}});
+    scheduler.enqueue({"quiet", {3, 3}});
+    ASSERT_EQ(scheduler.next()->request.subscriber_id, "noisy");
+    ASSERT_EQ(scheduler.next()->request.subscriber_id, "quiet");
+    ASSERT_EQ(scheduler.next()->request.subscriber_id, "noisy");
+}
+
 TEST(FaultInjectorTests, UsesSeededConfiguration)
 {
     FaultInjector injector({1.0, 0.0, 0.0, {}, 123});

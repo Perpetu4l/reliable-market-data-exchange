@@ -3,6 +3,7 @@
 #include "reliability/RecoveryProtocol.h"
 
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <optional>
@@ -38,6 +39,28 @@ private:
     std::unordered_map<std::string, std::deque<ScheduledRecovery>> per_subscriber_;
     std::deque<std::string> round_robin_order_;
     RecoverySchedulerMetrics metrics_;
+};
+
+// Blocking ownership wrapper for a live recovery acceptor/worker setup. The
+// policy implementation remains independently testable above; this wrapper
+// supplies synchronisation and shutdown semantics without making the policy
+// class itself depend on sockets or threads.
+class BlockingRecoveryScheduler {
+public:
+    explicit BlockingRecoveryScheduler(SchedulingPolicy policy = SchedulingPolicy::FCFS);
+    void enqueue(RecoveryRequest request);
+    [[nodiscard]] std::optional<ScheduledRecovery> wait_next();
+    void stop();
+    [[nodiscard]] size_t pending_count() const;
+    void record_completed(const ScheduledRecovery& recovery, uint64_t messages_recovered);
+    [[nodiscard]] RecoverySchedulerMetrics metrics() const;
+
+private:
+    mutable std::mutex mutex_;
+    std::condition_variable ready_;
+    RecoveryScheduler scheduler_;
+    bool stopping_{false};
+    size_t pending_count_{0};
 };
 
 } // namespace mdfeed::reliability
