@@ -76,6 +76,8 @@ TEST(RecoveryHistoryTests, RejectsRangeOutsideBoundedHistory)
     history.append(event(3));
     EXPECT_FALSE(history.get_range({1, 1}).has_value());
     EXPECT_TRUE(history.get_range({2, 3}).has_value());
+    EXPECT_EQ(history.minimum_sequence(), 2);
+    EXPECT_EQ(history.latest_sequence(), 3);
 }
 
 TEST(DualFeedSubscriberTests, ReplaysGapBeforeBufferedLaterEvent)
