@@ -32,7 +32,9 @@ struct OrderBookSnapshot {
     std::string hash;
 };
 
-// FNV-1a is used only as a deterministic design placeholder, not as a cryptographic claim.
+// Checkpoints are tamper-evident, not a tamper-proof database. Hash material
+// uses fixed-width big-endian fields and levels sorted by (side, price), then
+// includes the previous checkpoint's SHA-256 hex digest.
 class SnapshotHasher {
 public:
     [[nodiscard]] std::string compute_hash(const OrderBookSnapshot& snapshot, std::string_view previous_hash) const;

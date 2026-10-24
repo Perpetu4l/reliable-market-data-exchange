@@ -18,6 +18,7 @@ set(HEADER_FILES
         include/reliability/FaultInjector.h
         include/reliability/Experiments.h
         include/reliability/Metrics.h
+        include/reliability/Sha256.h
 )
 
 set(SOURCE_FILES
@@ -34,6 +35,7 @@ set(SOURCE_FILES
         src/reliability/FaultInjector.cpp
         src/reliability/Experiments.cpp
         src/reliability/Metrics.cpp
+        src/reliability/Sha256.cpp
 )
 
 add_library(MDFeed STATIC ${SOURCE_FILES} ${HEADER_FILES})

@@ -5,6 +5,7 @@
 #include "reliability/RecoveryProtocol.h"
 #include "reliability/RecoveryScheduler.h"
 #include "reliability/Snapshot.h"
+#include "reliability/Sha256.h"
 
 #include <gtest/gtest.h>
 
@@ -115,6 +116,25 @@ TEST(SnapshotManagerTests, CreatesVerifiableHashChain)
     EXPECT_TRUE(manager.verify_snapshots());
 }
 
+TEST(Sha256Tests, MatchesNistVectors)
+{
+    EXPECT_EQ(Sha256::hex_digest(""), "e3b0c44298fc1c149afbf4c8996fb924"
+        "27ae41e4649b934ca495991b7852b855");
+    EXPECT_EQ(Sha256::hex_digest("abc"), "ba7816bf8f01cfea414140de5dae2223"
+        "b00361a396177a9cb410ff61f20015ad");
+    EXPECT_EQ(Sha256::hex_digest("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+        "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
+}
+
+TEST(SnapshotManagerTests, RejectsTamperedSnapshot)
+{
+    SnapshotManager manager({1, 2, true});
+    auto snapshot = manager.create_snapshot(1, 7, {{100, 2, Side::BUY}}, 100);
+    ++snapshot.book_state.front().quantity;
+    manager.store_snapshot(std::move(snapshot));
+    EXPECT_FALSE(manager.verify_snapshots());
+}
+
 TEST(SnapshotManagerTests, VerifiesTheRetainedSegmentOfAHashChain)
 {
     SnapshotManager manager({1, 2, true});
@@ -138,6 +158,15 @@ TEST(FaultInjectorTests, UsesSeededConfiguration)
 {
     FaultInjector injector({1.0, 0.0, 0.0, {}, 123});
     EXPECT_TRUE(injector.apply(event(1)).empty());
+}
+
+TEST(FaultInjectorTests, SequenceDecisionsAreTimingIndependent)
+{
+    FaultInjector first({0.35, 0.25, 0.0, {}, 123});
+    FaultInjector second({0.35, 0.25, 0.0, {}, 123});
+    for (uint64_t sequence = 1; sequence <= 100; ++sequence) {
+        EXPECT_EQ(first.apply(event(sequence)).size(), second.apply(event(sequence)).size());
+    }
 }
 
 TEST(RedundancyExperimentTests, RecordsDesignLevelMetrics)

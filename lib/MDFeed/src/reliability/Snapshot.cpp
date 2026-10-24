@@ -1,28 +1,40 @@
 #include "reliability/Snapshot.h"
+#include "reliability/Sha256.h"
 
-#include <iomanip>
-#include <sstream>
+#include <algorithm>
+#include <vector>
 
 namespace mdfeed::reliability {
 namespace {
-uint64_t fnv1a(const std::string& value)
+template <typename T>
+void append_big_endian(std::vector<uint8_t>& output, const T value)
 {
-    uint64_t hash = 14695981039346656037ULL;
-    for (const unsigned char byte : value) { hash = (hash ^ byte) * 1099511628211ULL; }
-    return hash;
+    for (int shift = static_cast<int>(sizeof(T) * 8U) - 8; shift >= 0; shift -= 8) {
+        output.push_back(static_cast<uint8_t>(value >> shift));
+    }
 }
 }
 
 std::string SnapshotHasher::compute_hash(const OrderBookSnapshot& snapshot, const std::string_view previous_hash) const
 {
-    std::ostringstream material;
-    material << snapshot.sequence_number << ':' << snapshot.instrument_id << ':' << snapshot.timestamp_ns << ':' << previous_hash;
-    for (const auto& level : snapshot.book_state) {
-        material << ':' << level.price << ':' << level.quantity << ':' << static_cast<unsigned>(level.side);
+    std::vector<uint8_t> material;
+    material.reserve(32 + snapshot.book_state.size() * 17 + previous_hash.size());
+    append_big_endian(material, snapshot.sequence_number);
+    append_big_endian(material, snapshot.instrument_id);
+    append_big_endian(material, snapshot.timestamp_ns);
+    auto levels = snapshot.book_state;
+    std::sort(levels.begin(), levels.end(), [](const SnapshotPriceLevel& lhs, const SnapshotPriceLevel& rhs) {
+        if (lhs.side != rhs.side) return static_cast<uint8_t>(lhs.side) < static_cast<uint8_t>(rhs.side);
+        return lhs.price < rhs.price;
+    });
+    append_big_endian(material, static_cast<uint32_t>(levels.size()));
+    for (const auto& level : levels) {
+        append_big_endian(material, static_cast<uint8_t>(level.side));
+        append_big_endian(material, level.price);
+        append_big_endian(material, level.quantity);
     }
-    std::ostringstream result;
-    result << std::hex << std::setw(16) << std::setfill('0') << fnv1a(material.str());
-    return result.str();
+    material.insert(material.end(), previous_hash.begin(), previous_hash.end());
+    return Sha256::hex_digest(material);
 }
 
 bool SnapshotHasher::verify(const OrderBookSnapshot& snapshot) const

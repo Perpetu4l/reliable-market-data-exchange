@@ -162,7 +162,7 @@ int main(int argc, char* argv[])
         }
         ++metrics.mutable_metrics().packets_sent;
 
-        if (config.mode == "correlated" && correlated_faults.should_drop()) {
+        if (config.mode == "correlated" && correlated_faults.drops(event)) {
             ++metrics.mutable_metrics().packets_lost;
             std::cout << "CORRELATED LOSS seq=" << sequence << '\n';
             continue;
