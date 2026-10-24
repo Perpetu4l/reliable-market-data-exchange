@@ -77,6 +77,7 @@ public:
 
     explicit DualFeedSubscriber(EventHandler event_handler = {}, GapHandler gap_handler = {});
     void on_packet(FeedId feed_id, MarketDataEvent packet);
+    void on_heartbeat(uint64_t last_published_sequence);
     // Recovery responses enter through the same ordering path as feed events.
     void on_recovered_event(MarketDataEvent event);
     // Call after a validated snapshot has been applied to the local book state.

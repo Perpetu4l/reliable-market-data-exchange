@@ -176,6 +176,11 @@ int main(int argc, char* argv[])
         }
     }
 
+    // In the live system this arrives in a non-sequenced HEARTBEAT datagram.
+    // The deterministic driver emits one final heartbeat so dropped tail events
+    // are not silently excluded from the result.
+    subscriber->on_heartbeat(config.event_count);
+
     auto result = metrics.snapshot();
     const auto elapsed_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - experiment_started).count();
     result.throughput_events_per_second = elapsed_seconds > 0.0

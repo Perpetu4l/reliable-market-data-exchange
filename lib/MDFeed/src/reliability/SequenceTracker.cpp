@@ -5,10 +5,6 @@ namespace mdfeed::reliability {
 SequenceObservation SequenceTracker::on_event(const MarketDataEvent& event)
 {
     const auto sequence = event.header.sequence_number;
-    if (expected_sequence_ == 0) {
-        expected_sequence_ = sequence + 1;
-        return {};
-    }
     if (sequence < expected_sequence_) {
         ++duplicate_count_;
         return {SequenceDisposition::DUPLICATE, std::nullopt};
@@ -25,6 +21,22 @@ SequenceObservation SequenceTracker::on_event(const MarketDataEvent& event)
     out_of_order_sequences_.erase(sequence);
     expected_sequence_ = sequence + 1;
     return {};
+}
+
+SequenceObservation SequenceTracker::on_heartbeat(const uint64_t last_published_sequence)
+{
+    if (last_published_sequence < expected_sequence_) return {};
+
+    // If a later packet is already buffered, only the range before that packet
+    // is missing. Otherwise heartbeat establishes that the current tail is
+    // missing through the publisher's reported final sequence.
+    const auto later = out_of_order_sequences_.lower_bound(expected_sequence_);
+    const auto end = later == out_of_order_sequences_.end()
+        ? last_published_sequence
+        : *later - 1;
+    if (end < expected_sequence_) return {};
+    last_gap_ = MissingRange{expected_sequence_, end};
+    return {SequenceDisposition::GAP_DETECTED, last_gap_};
 }
 
 void SequenceTracker::reset(const uint64_t next_expected)

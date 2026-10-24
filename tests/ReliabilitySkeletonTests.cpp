@@ -30,6 +30,30 @@ TEST(SequenceTrackerTests, DetectsGapAndDuplicate)
     EXPECT_EQ(tracker.on_event(event(3)).disposition, SequenceDisposition::DUPLICATE);
 }
 
+// Regression for B2: the market-data sequence domain is global and begins at
+// one. A late first datagram must reveal the missing head range instead of
+// silently redefining the start of the stream.
+TEST(SequenceTrackerTests, DetectsMissingHeadFromGlobalSequenceStart)
+{
+    SequenceTracker tracker;
+    const auto observation = tracker.on_event(event(6));
+    ASSERT_EQ(observation.disposition, SequenceDisposition::GAP_DETECTED);
+    ASSERT_TRUE(observation.missing_range.has_value());
+    EXPECT_EQ(observation.missing_range->start_sequence, 1);
+    EXPECT_EQ(observation.missing_range->end_sequence, 5);
+}
+
+TEST(SequenceTrackerTests, HeartbeatDetectsMissingTail)
+{
+    SequenceTracker tracker;
+    EXPECT_EQ(tracker.on_event(event(1)).disposition, SequenceDisposition::ACCEPTED);
+    const auto observation = tracker.on_heartbeat(3);
+    ASSERT_EQ(observation.disposition, SequenceDisposition::GAP_DETECTED);
+    ASSERT_TRUE(observation.missing_range.has_value());
+    EXPECT_EQ(observation.missing_range->start_sequence, 2);
+    EXPECT_EQ(observation.missing_range->end_sequence, 3);
+}
+
 TEST(RecoveryHistoryTests, RejectsRangeOutsideBoundedHistory)
 {
     RecoveryHistory history(2);

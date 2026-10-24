@@ -59,6 +59,15 @@ void DualFeedSubscriber::on_packet(const FeedId feed_id, MarketDataEvent packet)
     if (result.missing_range && gap_handler_) gap_handler_(*result.missing_range);
 }
 
+void DualFeedSubscriber::on_heartbeat(const uint64_t last_published_sequence)
+{
+    const auto result = sequence_tracker_.on_heartbeat(last_published_sequence);
+    if (result.disposition == SequenceDisposition::GAP_DETECTED
+        && result.missing_range && gap_handler_) {
+        gap_handler_(*result.missing_range);
+    }
+}
+
 void DualFeedSubscriber::on_recovered_event(MarketDataEvent event)
 {
     const auto result = sequence_tracker_.on_event(event);
