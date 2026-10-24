@@ -5,6 +5,7 @@
 #include "reliability/RecoveryHistory.h"
 #include "reliability/RecoveryProtocol.h"
 #include "reliability/RecoveryScheduler.h"
+#include "reliability/RecoveryWire.h"
 #include "reliability/Snapshot.h"
 #include "reliability/Sha256.h"
 
@@ -78,6 +79,33 @@ TEST(RecoveryHistoryTests, RejectsRangeOutsideBoundedHistory)
     EXPECT_TRUE(history.get_range({2, 3}).has_value());
     EXPECT_EQ(history.minimum_sequence(), 2);
     EXPECT_EQ(history.latest_sequence(), 3);
+}
+
+TEST(RecoveryWireTests, RoundTripsPartialFramedRequest)
+{
+    const RecoveryRequest source{"subscriber-1", {10, 20}};
+    const auto bytes = RecoveryWireCodec::frame(RecoveryWireType::RECOVERY_REQUEST,
+        RecoveryWireCodec::encode_request(source));
+    std::vector<uint8_t> stream(bytes.begin(), bytes.begin() + 3);
+    std::string error;
+    EXPECT_FALSE(RecoveryWireCodec::take_frame(stream, error).has_value());
+    stream.insert(stream.end(), bytes.begin() + 3, bytes.end());
+    const auto frame = RecoveryWireCodec::take_frame(stream, error);
+    ASSERT_TRUE(frame.has_value()) << error;
+    ASSERT_EQ(frame->type, RecoveryWireType::RECOVERY_REQUEST);
+    const auto decoded = RecoveryWireCodec::decode_request(frame->payload, error);
+    ASSERT_TRUE(decoded.has_value()) << error;
+    EXPECT_EQ(decoded->subscriber_id, source.subscriber_id);
+    EXPECT_EQ(decoded->missing_range.start_sequence, 10);
+    EXPECT_EQ(decoded->missing_range.end_sequence, 20);
+}
+
+TEST(RecoveryWireTests, RejectsOversizedFrame)
+{
+    std::vector<uint8_t> stream{0xff, 0xff, 0xff, 0xff};
+    std::string error;
+    EXPECT_FALSE(RecoveryWireCodec::take_frame(stream, error).has_value());
+    EXPECT_EQ(error, "invalid recovery frame length");
 }
 
 TEST(DualFeedSubscriberTests, ReplaysGapBeforeBufferedLaterEvent)
