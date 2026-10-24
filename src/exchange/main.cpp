@@ -28,6 +28,10 @@ void print_usage(const char* program_name)
                  "(default: 9999)\n";
     std::cout << "  --md-interface <ip>      Market data interface IP "
                  "(default: 127.0.0.1)\n";
+    std::cout << "  --dual-feed              Publish the same event stream on Feed A and Feed B\n";
+    std::cout << "  --feed-b-ip <address>    Feed B multicast IP (default: 239.1.1.2)\n";
+    std::cout << "  --feed-b-port <port>     Feed B multicast port (default: 10000)\n";
+    std::cout << "  --heartbeat-ms <ms>      Market-data heartbeat interval (default: 1000)\n";
     std::cout << "  --oe-port <port>         Order entry TCP port (default: "
                  "8080, client mode only)\n";
     std::cout << "  --help, -h               Show this help message\n";
@@ -71,6 +75,18 @@ int main(const int argc, char* argv[])
         else if (arg == "--md-interface" && i + 1 < argc) {
             md_config.interface_ip = argv[++i];
         }
+        else if (arg == "--dual-feed") {
+            md_config.dual_feed = true;
+        }
+        else if (arg == "--feed-b-ip" && i + 1 < argc) {
+            md_config.feed_b_multicast_ip = argv[++i];
+        }
+        else if (arg == "--feed-b-port" && i + 1 < argc) {
+            md_config.feed_b_multicast_port = static_cast<uint16_t>(std::stoul(argv[++i]));
+        }
+        else if (arg == "--heartbeat-ms" && i + 1 < argc) {
+            md_config.heartbeat_interval = std::chrono::milliseconds(std::stoull(argv[++i]));
+        }
         else if (arg == "--oe-port" && i + 1 < argc) {
             oe_port = static_cast<uint16_t>(std::stoul(argv[++i]));
         }
@@ -93,6 +109,10 @@ int main(const int argc, char* argv[])
     std::cout << "Market Data: " << md_config.multicast_ip << ":"
               << md_config.multicast_port << std::endl;
     std::cout << "MD Interface: " << md_config.interface_ip << std::endl;
+    if (md_config.dual_feed) {
+        std::cout << "Market Data Feed B: " << md_config.feed_b_multicast_ip << ':'
+                  << md_config.feed_b_multicast_port << std::endl;
+    }
     if (mode == Exchange::Mode::CLIENT_ORDERS) {
         std::cout << "Order Entry Port: " << oe_port << std::endl;
     }

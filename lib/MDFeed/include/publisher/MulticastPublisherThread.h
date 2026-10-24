@@ -3,6 +3,7 @@
 #include "MulticastPublisher.h"
 #include "utils/RingBuffer.h"
 #include "utils/PublisherConfig.h"
+#include "messages/Messages.h"
 #include <thread>
 #include <atomic>
 
@@ -30,12 +31,15 @@ public:
 
 private:
     void publisher_loop();
+    bool send_to_feeds(const void* data, size_t length);
 
     std::shared_ptr<MDRingBuffer> ring_buffer_;
     PublisherConfig config_;
     MulticastPublisher multicast_publisher_;
+    MulticastPublisher feed_b_publisher_;
     std::atomic<bool> running_;
     std::thread publisher_thread_;
     Stats stats_;
+    uint64_t last_published_sequence_{0};
 };
 }
