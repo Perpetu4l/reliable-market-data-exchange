@@ -1,5 +1,0 @@
-if(EXISTS "/Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build-local/tests/Tests_e3b0c442_tests.cmake")
-  include("/Users/vaibhavkumar/Documents/Codex/2026-10-05/you-are-working-on-an-existing/reliable-market-data-exchange/build-local/tests/Tests_e3b0c442_tests.cmake")
-else()
-  add_test(Tests_NOT_BUILT Tests_NOT_BUILT)
-endif()

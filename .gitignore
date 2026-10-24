@@ -3,6 +3,7 @@ cmake-build-debug/
 cmake-build-release/
 cmake-build-debug-event-trace/
 build/
+build-*/
 
 # macOS
 .DS_Store
@@ -57,3 +58,4 @@ _skbuild/
 
 # Project-specific
 orderbook/stubs
+results/

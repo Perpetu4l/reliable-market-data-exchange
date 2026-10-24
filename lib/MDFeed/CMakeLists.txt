@@ -41,4 +41,4 @@ add_library(MDFeed STATIC ${SOURCE_FILES} ${HEADER_FILES})
 target_include_directories(MDFeed PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 find_package(Threads REQUIRED)
-target_link_libraries(MDFeed Threads::Threads)
+target_link_libraries(MDFeed PUBLIC Threads::Threads Boost::headers)

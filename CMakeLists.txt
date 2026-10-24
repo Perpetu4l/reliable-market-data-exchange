@@ -15,20 +15,11 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif ()
 
-# Boost setup
-set(BOOST_ROOT /opt/homebrew/Cellar/boost/1.82.0_1)
-set(BOOST_INCLUDE_DIR /opt/homebrew/Cellar/boost/1.82.0_1/include)
-set(BOOST_LIBRARY_DIR /opt/homebrew/Cellar/boost/1.82.0_1/lib)
-find_package(Boost 1.82.0 COMPONENTS REQUIRED)
-include_directories(${Boost_INCLUDE_DIR})
-if (NOT Boost_FOUND)
-    message(FATAL_ERROR "Could not find boost!")
-endif ()
-
-# spdlog setup
-set(SPDLOG_ROOT /opt/homebrew/Cellar/spdlog/1.12.0)
+# Dependencies are discovered through normal CMake package search paths. On a
+# Homebrew installation CMake normally finds these automatically; callers may
+# still provide Boost_ROOT or spdlog_DIR when using a non-standard prefix.
+find_package(Boost 1.82 REQUIRED)
 find_package(spdlog REQUIRED)
-include_directories(/opt/homebrew/Cellar/spdlog/1.12.0/include)
 
 add_subdirectory(lib)
 add_subdirectory(src)
