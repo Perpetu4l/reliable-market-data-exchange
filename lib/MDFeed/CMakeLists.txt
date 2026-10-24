@@ -19,6 +19,7 @@ set(HEADER_FILES
         include/reliability/Experiments.h
         include/reliability/Metrics.h
         include/reliability/Sha256.h
+        include/reliability/BookBuilder.h
 )
 
 set(SOURCE_FILES
@@ -36,6 +37,7 @@ set(SOURCE_FILES
         src/reliability/Experiments.cpp
         src/reliability/Metrics.cpp
         src/reliability/Sha256.cpp
+        src/reliability/BookBuilder.cpp
 )
 
 add_library(MDFeed STATIC ${SOURCE_FILES} ${HEADER_FILES})

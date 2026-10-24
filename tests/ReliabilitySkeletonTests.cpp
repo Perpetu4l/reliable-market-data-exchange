@@ -1,4 +1,5 @@
 #include "reliability/DualFeed.h"
+#include "reliability/BookBuilder.h"
 #include "reliability/Experiments.h"
 #include "reliability/FaultInjector.h"
 #include "reliability/RecoveryHistory.h"
@@ -9,6 +10,8 @@
 
 #include <gtest/gtest.h>
 
+#include <cstring>
+
 using namespace mdfeed::reliability;
 
 namespace {
@@ -16,6 +19,16 @@ MarketDataEvent event(const uint64_t sequence)
 {
     MarketDataEvent result;
     result.header.sequence_number = sequence;
+    return result;
+}
+
+template <typename T>
+MarketDataEvent packaged_event(const T& message)
+{
+    MarketDataEvent result;
+    result.header = message.header;
+    result.payload.resize(sizeof(T));
+    std::memcpy(result.payload.data(), &message, sizeof(T));
     return result;
 }
 }
@@ -133,6 +146,32 @@ TEST(SnapshotManagerTests, RejectsTamperedSnapshot)
     ++snapshot.book_state.front().quantity;
     manager.store_snapshot(std::move(snapshot));
     EXPECT_FALSE(manager.verify_snapshots());
+}
+
+TEST(BookBuilderTests, AppliesAbsolutePriceLevelUpdatesAndDeletes)
+{
+    BookBuilder builder;
+    PriceLevelUpdateMessage update{};
+    message_utils::init_header(update, MessageType::PRICE_LEVEL_UPDATE, 1, 7);
+    update.price = 50000;
+    update.quantity = 10;
+    update.side = Side::BUY;
+    update.action = UpdateAction::NEW;
+    ASSERT_TRUE(builder.apply(packaged_event(update)));
+
+    update.header.sequence_number = 2;
+    update.quantity = 25; // CHANGE is an absolute level quantity, not a delta.
+    update.action = UpdateAction::CHANGE;
+    ASSERT_TRUE(builder.apply(packaged_event(update)));
+    ASSERT_EQ(builder.levels(7).size(), 1);
+    EXPECT_EQ(builder.levels(7).front().quantity, 25);
+
+    PriceLevelDeleteMessage deletion{};
+    message_utils::init_header(deletion, MessageType::PRICE_LEVEL_DELETE, 3, 7);
+    deletion.price = 50000;
+    deletion.side = Side::BUY;
+    ASSERT_TRUE(builder.apply(packaged_event(deletion)));
+    EXPECT_TRUE(builder.levels(7).empty());
 }
 
 TEST(SnapshotManagerTests, VerifiesTheRetainedSegmentOfAHashChain)
