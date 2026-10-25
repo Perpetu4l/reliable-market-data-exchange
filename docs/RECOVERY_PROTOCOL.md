@@ -1,9 +1,9 @@
 # Recovery TCP protocol
 
 Status: the exchange hosts this listener when `--recovery-port` is non-zero
-(default `9090`) and `recovery_client` is a command-line request client.
-Automatic recovery from a live UDP subscriber and TCP snapshot transfer remain
-unimplemented.
+(default `9090`), `recovery_client` is a command-line request client, and
+`reliable_subscriber` invokes it after a live UDP sequence gap. TCP snapshot
+transfer remains unimplemented.
 
 Recovery traffic uses TCP independently from order entry. The default port is
 `9090`. A TCP stream contains one or more frames:
