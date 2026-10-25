@@ -1,6 +1,7 @@
 #include "Exchange.h"
 #include <utility>
 #include <sys/socket.h>
+#include <cstring>
 
 Exchange::Exchange(const Mode mode, mdfeed::PublisherConfig md_config, const uint16_t oe_port)
     : mode_(mode), running_(false), md_config_(std::move(md_config)),
@@ -8,8 +9,18 @@ Exchange::Exchange(const Mode mode, mdfeed::PublisherConfig md_config, const uin
       quantity_dist_(100, 20), bool_dist_(0.5)
 {
     md_publisher_ = std::make_unique<mdfeed::MarketDataPublisher>(md_config_);
+    recovery_history_ = std::make_shared<mdfeed::reliability::RecoveryHistory>(
+        md_config_.recovery_history_events);
     multicast_thread_ = std::make_unique<
-        mdfeed::MulticastPublisherThread>(md_publisher_->get_ring_buffer(), md_config_);
+        mdfeed::MulticastPublisherThread>(md_publisher_->get_ring_buffer(), md_config_,
+            [history = recovery_history_](const mdfeed::MessageBuffer& buffer) {
+                if (buffer.length < sizeof(mdfeed::MessageHeader)) return;
+                mdfeed::reliability::MarketDataEvent event;
+                std::memcpy(&event.header, buffer.data, sizeof(event.header));
+                event.payload.assign(reinterpret_cast<const uint8_t*>(buffer.data),
+                    reinterpret_cast<const uint8_t*>(buffer.data) + buffer.length);
+                history->append(std::move(event));
+            });
 
     symbol_manager_ = std::make_unique<SymbolManager>(*md_publisher_);
 

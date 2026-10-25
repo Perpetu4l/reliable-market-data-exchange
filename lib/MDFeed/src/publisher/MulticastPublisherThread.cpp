@@ -5,8 +5,9 @@
 
 namespace mdfeed {
 MulticastPublisherThread::MulticastPublisherThread(const std::shared_ptr<MDRingBuffer>& ring_buffer,
-    PublisherConfig config)
-    : ring_buffer_(ring_buffer), config_(std::move(config)), running_(false)
+    PublisherConfig config, PublishedMessageHandler handler)
+    : ring_buffer_(ring_buffer), config_(std::move(config)), running_(false),
+      published_message_handler_(std::move(handler))
 {
 }
 
@@ -75,6 +76,7 @@ void MulticastPublisherThread::publisher_loop()
     std::cout << "Publisher thread started" << std::endl;
     while (running_.load(std::memory_order_relaxed)) {
         if (ring_buffer_->pop(message)) {
+            if (published_message_handler_) published_message_handler_(message);
             if (send_to_feeds(message.data, message.length)) {
                 stats_.messages_sent++;
                 if (message.length >= sizeof(MessageHeader)) {

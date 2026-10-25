@@ -1,6 +1,8 @@
 #pragma once
 #include <string>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 
 namespace mdfeed {
 struct PublisherConfig {
@@ -14,6 +16,9 @@ struct PublisherConfig {
     bool use_busy_wait = false;
     std::chrono::microseconds spin_duration{100};
     size_t ring_buffer_size = 65536;
+    // Number of published (non-heartbeat) market-data messages retained for
+    // subscriber-initiated TCP recovery.  Zero disables in-memory recovery.
+    size_t recovery_history_events = 65536;
 };
 }
 

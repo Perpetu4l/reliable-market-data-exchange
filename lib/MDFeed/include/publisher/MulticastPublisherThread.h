@@ -6,12 +6,14 @@
 #include "messages/Messages.h"
 #include <thread>
 #include <atomic>
+#include <functional>
 
 namespace mdfeed {
 class MulticastPublisherThread {
 public:
+    using PublishedMessageHandler = std::function<void(const MessageBuffer&)>;
     explicit MulticastPublisherThread(const std::shared_ptr<MDRingBuffer>& ring_buffer,
-        PublisherConfig config = PublisherConfig{});
+        PublisherConfig config = PublisherConfig{}, PublishedMessageHandler handler = {});
     ~MulticastPublisherThread();
 
     MulticastPublisherThread(const MulticastPublisherThread&) = delete;
@@ -41,5 +43,6 @@ private:
     std::thread publisher_thread_;
     Stats stats_;
     uint64_t last_published_sequence_{0};
+    PublishedMessageHandler published_message_handler_;
 };
 }

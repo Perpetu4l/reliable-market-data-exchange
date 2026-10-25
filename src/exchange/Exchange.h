@@ -6,6 +6,7 @@
 #include "publisher/MulticastPublisherThread.h"
 #include "server/OrderEntryServer.h"
 #include "utils/PublisherConfig.h"
+#include "reliability/RecoveryHistory.h"
 #include <atomic>
 #include <iostream>
 #include <memory>
@@ -25,6 +26,7 @@ private:
     std::unique_ptr<mdfeed::MarketDataPublisher> md_publisher_;
     std::unique_ptr<mdfeed::MulticastPublisherThread> multicast_thread_;
     mdfeed::PublisherConfig md_config_;
+    std::shared_ptr<mdfeed::reliability::RecoveryHistory> recovery_history_;
 
     std::unique_ptr<SymbolManager> symbol_manager_;
 
