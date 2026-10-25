@@ -28,6 +28,7 @@ public:
     [[nodiscard]] std::optional<MissingRange> get_missing_range() const { return last_gap_; }
     [[nodiscard]] uint64_t expected_sequence() const { return expected_sequence_; }
     [[nodiscard]] uint64_t duplicate_count() const { return duplicate_count_; }
+    [[nodiscard]] uint64_t gap_count() const { return gap_count_; }
     // Market-data sequences are global and begin at one. Starting from the
     // first datagram silently loses a dropped head-of-stream event.
     void reset(uint64_t next_expected = 1);
@@ -36,6 +37,7 @@ public:
 private:
     uint64_t expected_sequence_{1};
     uint64_t duplicate_count_{0};
+    uint64_t gap_count_{0};
     std::optional<MissingRange> last_gap_;
     std::set<uint64_t> out_of_order_sequences_;
 };

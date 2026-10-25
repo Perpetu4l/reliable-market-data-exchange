@@ -69,6 +69,18 @@ TEST(SequenceTrackerTests, HeartbeatDetectsMissingTail)
     EXPECT_EQ(observation.missing_range->end_sequence, 3);
 }
 
+TEST(SequenceTrackerTests, ClearsGapAfterRecoveryAndDoesNotCountRepeatedHeartbeat)
+{
+    SequenceTracker tracker;
+    EXPECT_EQ(tracker.on_event(event(3)).disposition, SequenceDisposition::GAP_DETECTED);
+    EXPECT_EQ(tracker.gap_count(), 1U);
+    EXPECT_EQ(tracker.on_heartbeat(3).disposition, SequenceDisposition::GAP_DETECTED);
+    EXPECT_EQ(tracker.gap_count(), 1U);
+    tracker.on_event(event(1));
+    tracker.on_event(event(2));
+    EXPECT_FALSE(tracker.has_gap());
+}
+
 TEST(RecoveryHistoryTests, RejectsRangeOutsideBoundedHistory)
 {
     RecoveryHistory history(2);

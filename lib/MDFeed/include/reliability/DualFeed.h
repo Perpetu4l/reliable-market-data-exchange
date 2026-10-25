@@ -6,6 +6,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 
 namespace mdfeed::reliability {
 
@@ -90,6 +91,10 @@ private:
     void drain_pending_events();
 
     SequenceTracker sequence_tracker_;
+    // Feed A and Feed B callbacks may run on separate UDP receiver threads.
+    // A recursive mutex also permits the synchronous recovery callback to
+    // inject recovered events through the normal ordering path.
+    mutable std::recursive_mutex mutex_;
     EventHandler event_handler_;
     GapHandler gap_handler_;
     std::map<uint64_t, MarketDataEvent> pending_events_;

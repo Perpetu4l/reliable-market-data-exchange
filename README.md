@@ -57,9 +57,11 @@ seed, history, snapshot, and scheduling experiments are repeatable. The GUI
 runs this compiled demo and displays its emitted metrics; it is not labelled or
 presented as a live production multicast/recovery deployment.
 
-The normal `exchange` now exposes a separate live recovery TCP endpoint, but
-there is not yet a live UDP subscriber executable that automatically detects a
-gap and invokes it. Use `recovery_client` to verify retained ranges manually.
+The normal `exchange` now exposes a separate live recovery TCP endpoint, and
+`reliable_subscriber` joins Feed A (and optionally Feed B), performs
+first-copy-wins sequencing, and requests retained gaps over that endpoint.
+Use `recovery_client` to verify a retained range manually. TCP snapshot
+transfer remains unavailable when the history window is too old.
 
 ## Prerequisites
 
@@ -325,6 +327,23 @@ The client accepts numeric IPv4 addresses, so replace `127.0.0.1` with the
 server machine's reachable LAN address for a remote test. This project does
 not yet provide TLS/authentication, TCP snapshot transfer, or automatic live
 subscriber recovery.
+
+To exercise the full live subscriber path on a normal host, start this after
+the exchange:
+
+```sh
+./build-local/src/reliable_subscriber --dual-feed \
+  --feed-a-ip 239.1.1.1 --feed-a-port 9999 \
+  --feed-b-ip 239.1.1.2 --feed-b-port 10000 \
+  --interface 127.0.0.1 --recovery-server 127.0.0.1 --recovery-port 9090
+```
+
+It prints `DELIVERED`, `RECOVERY OK`, and a final count of duplicates, gaps,
+recovery requests, and failures. The subscriber does not inject loss itself;
+use an operating-system/network test mechanism or a purpose-built publisher
+fault stage when testing loss. This sandbox blocks socket binding, so this
+live path was compiled and its startup-error handling was checked here, but it
+must be run on a normal macOS/Linux host for multicast/TCP end-to-end proof.
 
 ### Automatic local TCP workload
 

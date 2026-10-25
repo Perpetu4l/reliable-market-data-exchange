@@ -29,3 +29,6 @@ target_link_libraries(reliability_demo MDFeed)
 # retained publisher history.
 add_executable(recovery_client recovery_client/main.cpp)
 target_link_libraries(recovery_client MDFeed)
+
+add_executable(reliable_subscriber reliable_subscriber/main.cpp)
+target_link_libraries(reliable_subscriber MDFeed)
