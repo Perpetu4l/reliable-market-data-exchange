@@ -481,6 +481,9 @@ void Exchange::print_final_stats() const
     std::cout << "\n=== FINAL EXCHANGE STATISTICS ===" << std::endl;
     std::cout << "Market Data Messages sent: " << stats.messages_sent << std::endl;
     std::cout << "Market Data Send failures: " << stats.send_failures << std::endl;
+    std::cout << "Feed A/B successful sends: " << stats.feed_a_sent << '/' << stats.feed_b_sent << std::endl;
+    std::cout << "Feed A/B application-layer drops: " << stats.feed_a_app_dropped << '/'
+              << stats.feed_b_app_dropped << std::endl;
 
     if (order_server_) {
         const auto stats = order_server_->get_stats();

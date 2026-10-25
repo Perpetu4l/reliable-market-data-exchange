@@ -7,6 +7,9 @@ namespace mdfeed {
 MulticastPublisherThread::MulticastPublisherThread(const std::shared_ptr<MDRingBuffer>& ring_buffer,
     PublisherConfig config, PublishedMessageHandler handler)
     : ring_buffer_(ring_buffer), config_(std::move(config)), running_(false),
+      feed_a_faults_({config_.feed_a_loss_rate, 0.0, 0.0, {}, config_.fault_random_seed}),
+      feed_b_faults_({config_.feed_b_loss_rate, 0.0, 0.0, {}, config_.fault_random_seed + 1}),
+      correlated_faults_({config_.correlated_loss_rate, 0.0, 0.0, {}, config_.fault_random_seed}),
       published_message_handler_(std::move(handler))
 {
 }
@@ -78,7 +81,6 @@ void MulticastPublisherThread::publisher_loop()
         if (ring_buffer_->pop(message)) {
             if (published_message_handler_) published_message_handler_(message);
             if (send_to_feeds(message.data, message.length)) {
-                stats_.messages_sent++;
                 if (message.length >= sizeof(MessageHeader)) {
                     const auto* header = reinterpret_cast<const MessageHeader*>(message.data);
                     if (static_cast<MessageType>(header->message_type) != MessageType::HEARTBEAT) {
@@ -125,8 +127,39 @@ void MulticastPublisherThread::publisher_loop()
 
 bool MulticastPublisherThread::send_to_feeds(const void* data, const size_t length)
 {
-    const bool a_sent = multicast_publisher_.send(data, length);
-    const bool b_sent = !config_.dual_feed || feed_b_publisher_.send(data, length);
-    return a_sent && b_sent;
+    if (length < sizeof(MessageHeader)) return false;
+    const auto* header = static_cast<const MessageHeader*>(data);
+    const bool is_heartbeat = static_cast<MessageType>(header->message_type) == MessageType::HEARTBEAT;
+    reliability::MarketDataEvent event;
+    event.header = *header;
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    event.payload.assign(bytes, bytes + length);
+
+    const bool correlated_drop = !is_heartbeat && correlated_faults_.drops(event);
+    const bool drop_a = correlated_drop || (!is_heartbeat && feed_a_faults_.drops(event));
+    const bool drop_b = correlated_drop || (!is_heartbeat && feed_b_faults_.drops(event));
+
+    bool a_ok = true;
+    bool b_ok = true;
+    if (drop_a) {
+        ++stats_.feed_a_app_dropped;
+    } else {
+        a_ok = multicast_publisher_.send(data, length);
+        if (a_ok) ++stats_.feed_a_sent;
+    }
+    if (config_.dual_feed) {
+        if (drop_b) {
+            ++stats_.feed_b_app_dropped;
+        } else {
+            b_ok = feed_b_publisher_.send(data, length);
+            if (b_ok) ++stats_.feed_b_sent;
+        }
+    }
+    if ((!drop_a && a_ok) || (config_.dual_feed && !drop_b && b_ok)) {
+        ++stats_.messages_sent;
+    }
+    // An intentional application-layer drop is a configured experiment result,
+    // not a send failure. Only report actual attempted send failures here.
+    return a_ok && b_ok;
 }
 }

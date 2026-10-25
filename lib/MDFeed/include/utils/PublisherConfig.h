@@ -26,6 +26,12 @@ struct PublisherConfig {
     // different framed protocol.
     uint16_t recovery_port = 9090;
     std::string recovery_scheduling_policy{"fcfs"};
+    // Deterministic application-layer withholding for live experiments. These
+    // are not operating-system or physical-network packet-loss measurements.
+    double feed_a_loss_rate{0.0};
+    double feed_b_loss_rate{0.0};
+    double correlated_loss_rate{0.0};
+    uint64_t fault_random_seed{42};
 };
 }
 

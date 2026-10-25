@@ -100,3 +100,17 @@ pending requests. At clean shutdown the exchange prints measured
 connection/request/response counts, recovered-message count, per-subscriber
 service count, and queue-wait average/max. Snapshot requests currently bypass
 this fairness queue and are handled by the connection handler.
+
+## Controlled live loss experiments
+
+The exchange can withhold outbound **application messages** deterministically:
+
+```text
+--feed-a-loss RATE --feed-b-loss RATE --fault-seed N
+--correlated-loss RATE --fault-seed N
+```
+
+Independent Feed A/B rates use distinct deterministic streams; correlated loss
+uses one decision for both feeds. These controls run before multicast socket
+sends, preserve the authoritative recovery history, and never drop heartbeats.
+They are not evidence of OS-level or physical-network packet loss.

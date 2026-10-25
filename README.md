@@ -313,7 +313,8 @@ window. Feed A and Feed B carry the same original market-data datagrams.
   --feed-b-ip 239.1.1.2 --feed-b-port 10000 \
   --history 65536 --recovery-port 9090 \
   --snapshot-interval 1000 --snapshot-retention 8 \
-  --recovery-policy round-robin
+  --recovery-policy round-robin \
+  --feed-a-loss 0.20 --feed-b-loss 0.20 --fault-seed 7
 ```
 
 The recovery listener binds to all IPv4 interfaces on the configured port. In
@@ -348,6 +349,15 @@ policy. On clean shutdown, the exchange prints real listener counters,
 scheduled requests, recovered messages, queue-wait average/max, and the number
 of subscriber identities served. These values are measured service counters,
 not synthetic dashboard data.
+
+For a controlled live fault run, `--feed-a-loss` and `--feed-b-loss` with the
+same `--fault-seed` deterministically withhold selected datagrams before their
+respective multicast `sendto` calls. `--correlated-loss` withholds a selected
+datagram from both feeds. These flags model **application-layer message
+withholding**, not packet loss imposed by the kernel, router, Wi-Fi, or network
+interface. Heartbeats are deliberately not withheld, so a subscriber can expose
+a missing tail sequence. The exchange prints per-feed withheld-datagram counts
+at shutdown.
 
 To exercise the full live subscriber path on a normal host, start this after
 the exchange:

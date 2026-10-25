@@ -37,6 +37,10 @@ void print_usage(const char* program_name)
     std::cout << "  --snapshot-retention <N> Number of snapshots retained (default: 8)\n";
     std::cout << "  --recovery-port <port>   Recovery TCP port (default: 9090; 0 disables)\n";
     std::cout << "  --recovery-policy <name> Recovery scheduler: fcfs|round-robin (default: fcfs)\n";
+    std::cout << "  --feed-a-loss <rate>     Application-layer loss rate for Feed A [0,1]\n";
+    std::cout << "  --feed-b-loss <rate>     Application-layer loss rate for Feed B [0,1]\n";
+    std::cout << "  --correlated-loss <rate> Application-layer loss applied to both feeds [0,1]\n";
+    std::cout << "  --fault-seed <N>         Deterministic live fault seed (default: 42)\n";
     std::cout << "  --oe-port <port>         Order entry TCP port (default: "
                  "8080, client mode only)\n";
     std::cout << "  --help, -h               Show this help message\n";
@@ -112,6 +116,18 @@ int main(const int argc, char* argv[])
                 return 1;
             }
         }
+        else if (arg == "--feed-a-loss" && i + 1 < argc) {
+            md_config.feed_a_loss_rate = std::stod(argv[++i]);
+        }
+        else if (arg == "--feed-b-loss" && i + 1 < argc) {
+            md_config.feed_b_loss_rate = std::stod(argv[++i]);
+        }
+        else if (arg == "--correlated-loss" && i + 1 < argc) {
+            md_config.correlated_loss_rate = std::stod(argv[++i]);
+        }
+        else if (arg == "--fault-seed" && i + 1 < argc) {
+            md_config.fault_random_seed = std::stoull(argv[++i]);
+        }
         else if (arg == "--oe-port" && i + 1 < argc) {
             oe_port = static_cast<uint16_t>(std::stoul(argv[++i]));
         }
@@ -124,6 +140,13 @@ int main(const int argc, char* argv[])
             print_usage(argv[0]);
             return 1;
         }
+    }
+
+    if (md_config.feed_a_loss_rate < 0.0 || md_config.feed_a_loss_rate > 1.0
+        || md_config.feed_b_loss_rate < 0.0 || md_config.feed_b_loss_rate > 1.0
+        || md_config.correlated_loss_rate < 0.0 || md_config.correlated_loss_rate > 1.0) {
+        std::cerr << "Feed loss rates must be in [0, 1]" << std::endl;
+        return 1;
     }
 
     std::cout << "=== ENHANCED EXCHANGE ===" << std::endl;
@@ -142,6 +165,9 @@ int main(const int argc, char* argv[])
               << (md_config.recovery_port == 0 ? "disabled" : std::to_string(md_config.recovery_port))
               << std::endl;
     std::cout << "Recovery scheduling policy: " << md_config.recovery_scheduling_policy << std::endl;
+    std::cout << "Application-layer feed loss A/B/correlated: " << md_config.feed_a_loss_rate << '/'
+              << md_config.feed_b_loss_rate << '/' << md_config.correlated_loss_rate
+              << " (seed " << md_config.fault_random_seed << ")" << std::endl;
     if (md_config.dual_feed) {
         std::cout << "Market Data Feed B: " << md_config.feed_b_multicast_ip << ':'
                   << md_config.feed_b_multicast_port << std::endl;
