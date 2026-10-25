@@ -19,7 +19,10 @@ Exchange::Exchange(const Mode mode, mdfeed::PublisherConfig md_config, const uin
         recovery_history_, snapshot_manager_);
     if (md_config_.recovery_port != 0) {
         recovery_tcp_server_ = std::make_unique<mdfeed::reliability::RecoveryTcpServer>(
-            mdfeed::reliability::RecoveryTcpServer::Config{md_config_.recovery_port}, recovery_service_);
+            mdfeed::reliability::RecoveryTcpServer::Config{md_config_.recovery_port,
+                md_config_.recovery_scheduling_policy == "round-robin"
+                    ? mdfeed::reliability::SchedulingPolicy::ROUND_ROBIN
+                    : mdfeed::reliability::SchedulingPolicy::FCFS}, recovery_service_);
     }
     multicast_thread_ = std::make_unique<
         mdfeed::MulticastPublisherThread>(md_publisher_->get_ring_buffer(), md_config_,
@@ -485,6 +488,24 @@ void Exchange::print_final_stats() const
         std::cout << "Order Entry Total connections: " << stats.connections << std::endl;
         std::cout << "Order Entry malformed frames: " << stats.malformed_messages << std::endl;
         std::cout << "Order Entry queue overflows: " << stats.queue_overflows << std::endl;
+    }
+
+    if (recovery_tcp_server_) {
+        const auto recovery = recovery_tcp_server_->stats();
+        const auto scheduler = recovery_tcp_server_->scheduler_metrics();
+        const auto average_wait = scheduler.recovery_request_count == 0 ? 0
+            : scheduler.total_queue_wait_ns / scheduler.recovery_request_count;
+        std::cout << "Recovery TCP connections: " << recovery.connections << std::endl;
+        std::cout << "Recovery TCP requests/responses: " << recovery.requests_received << '/'
+                  << recovery.responses_sent << std::endl;
+        std::cout << "Recovery TCP malformed/send failures: " << recovery.malformed_frames << '/'
+                  << recovery.send_failures << std::endl;
+        std::cout << "Recovery scheduler requests/messages: " << scheduler.recovery_request_count << '/'
+                  << scheduler.messages_recovered << std::endl;
+        std::cout << "Recovery queue wait avg/max ns: " << average_wait << '/'
+                  << scheduler.max_queue_wait_ns << std::endl;
+        std::cout << "Recovery subscribers served: "
+                  << scheduler.per_subscriber_service_distribution.size() << std::endl;
     }
 
     for (const auto symbols = symbol_manager_->get_all_symbols();

@@ -217,6 +217,21 @@ TEST(SnapshotManagerTests, FindsCheckpointAtOrAfterRecoveryRange)
     EXPECT_EQ(snapshot->sequence_number, 20U);
 }
 
+TEST(RecoverySchedulerTests, RecordsQueueWaitAndServiceDistribution)
+{
+    RecoveryScheduler scheduler(SchedulingPolicy::FCFS);
+    scheduler.enqueue({"first", {1, 1}});
+    const auto scheduled = scheduler.next();
+    ASSERT_TRUE(scheduled.has_value());
+    scheduler.record_completed(*scheduled, 1, 250);
+    const auto& metrics = scheduler.metrics();
+    EXPECT_EQ(metrics.recovery_request_count, 1U);
+    EXPECT_EQ(metrics.messages_recovered, 1U);
+    EXPECT_EQ(metrics.total_queue_wait_ns, 250U);
+    EXPECT_EQ(metrics.max_queue_wait_ns, 250U);
+    EXPECT_EQ(metrics.per_subscriber_service_distribution.at("first"), 1U);
+}
+
 TEST(BookBuilderTests, AppliesAbsolutePriceLevelUpdatesAndDeletes)
 {
     BookBuilder builder;

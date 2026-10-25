@@ -22,6 +22,8 @@ struct ScheduledRecovery {
 struct RecoverySchedulerMetrics {
     uint64_t recovery_request_count{0};
     uint64_t messages_recovered{0};
+    uint64_t total_queue_wait_ns{0};
+    uint64_t max_queue_wait_ns{0};
     std::unordered_map<std::string, uint64_t> per_subscriber_service_distribution;
 };
 
@@ -31,7 +33,8 @@ public:
     explicit RecoveryScheduler(SchedulingPolicy policy = SchedulingPolicy::FCFS);
     void enqueue(RecoveryRequest request);
     [[nodiscard]] std::optional<ScheduledRecovery> next();
-    void record_completed(const ScheduledRecovery& recovery, uint64_t messages_recovered);
+    void record_completed(const ScheduledRecovery& recovery, uint64_t messages_recovered,
+        uint64_t queue_wait_ns = 0);
     [[nodiscard]] const RecoverySchedulerMetrics& metrics() const { return metrics_; }
 private:
     SchedulingPolicy policy_;
@@ -52,7 +55,8 @@ public:
     [[nodiscard]] std::optional<ScheduledRecovery> wait_next();
     void stop();
     [[nodiscard]] size_t pending_count() const;
-    void record_completed(const ScheduledRecovery& recovery, uint64_t messages_recovered);
+    void record_completed(const ScheduledRecovery& recovery, uint64_t messages_recovered,
+        uint64_t queue_wait_ns = 0);
     [[nodiscard]] RecoverySchedulerMetrics metrics() const;
 
 private:

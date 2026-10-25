@@ -250,8 +250,10 @@ void RecoveryTcpServer::worker_loop()
             std::lock_guard write_lock(pending.connection->write_mutex);
             if (pending.connection->open.load()) sent = send_all(pending.connection->fd, bytes);
         }
+        const auto queue_wait_ns = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - scheduled->enqueued_at).count());
         scheduler_.record_completed(*scheduled,
-            response.status == RecoveryStatus::OK ? response.events.size() : 0);
+            response.status == RecoveryStatus::OK ? response.events.size() : 0, queue_wait_ns);
         std::lock_guard lock(stats_mutex_);
         if (sent) ++stats_.responses_sent;
         else ++stats_.send_failures;

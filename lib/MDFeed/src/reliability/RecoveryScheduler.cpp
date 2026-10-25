@@ -1,5 +1,7 @@
 #include "reliability/RecoveryScheduler.h"
 
+#include <algorithm>
+
 namespace mdfeed::reliability {
 
 RecoveryScheduler::RecoveryScheduler(const SchedulingPolicy policy) : policy_(policy) {}
@@ -35,9 +37,12 @@ std::optional<ScheduledRecovery> RecoveryScheduler::next()
     return next_request;
 }
 
-void RecoveryScheduler::record_completed(const ScheduledRecovery& recovery, const uint64_t messages_recovered)
+void RecoveryScheduler::record_completed(const ScheduledRecovery& recovery, const uint64_t messages_recovered,
+    const uint64_t queue_wait_ns)
 {
     metrics_.messages_recovered += messages_recovered;
+    metrics_.total_queue_wait_ns += queue_wait_ns;
+    metrics_.max_queue_wait_ns = std::max(metrics_.max_queue_wait_ns, queue_wait_ns);
     ++metrics_.per_subscriber_service_distribution[recovery.request.subscriber_id];
 }
 
@@ -79,10 +84,11 @@ size_t BlockingRecoveryScheduler::pending_count() const
     return pending_count_;
 }
 
-void BlockingRecoveryScheduler::record_completed(const ScheduledRecovery& recovery, const uint64_t messages_recovered)
+void BlockingRecoveryScheduler::record_completed(const ScheduledRecovery& recovery, const uint64_t messages_recovered,
+    const uint64_t queue_wait_ns)
 {
     std::lock_guard lock(mutex_);
-    scheduler_.record_completed(recovery, messages_recovered);
+    scheduler_.record_completed(recovery, messages_recovered, queue_wait_ns);
 }
 
 RecoverySchedulerMetrics BlockingRecoveryScheduler::metrics() const

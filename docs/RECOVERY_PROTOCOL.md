@@ -91,3 +91,12 @@ u16 detail_length;        bytes detail
 `reliable_subscriber` verifies the checkpoint hash, applies its absolute price
 levels to its local market-data book, and only then advances sequence
 continuity. A bad hash is a recovery failure, not a successful resync.
+
+## Scheduling and service counters
+
+`--recovery-policy fcfs` serves retained-event requests in arrival order;
+`--recovery-policy round-robin` rotates among subscriber identities with
+pending requests. At clean shutdown the exchange prints measured
+connection/request/response counts, recovered-message count, per-subscriber
+service count, and queue-wait average/max. Snapshot requests currently bypass
+this fairness queue and are handled by the connection handler.

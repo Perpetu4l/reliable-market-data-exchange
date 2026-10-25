@@ -312,7 +312,8 @@ window. Feed A and Feed B carry the same original market-data datagrams.
   --md-ip 239.1.1.1 --md-port 9999 \
   --feed-b-ip 239.1.1.2 --feed-b-port 10000 \
   --history 65536 --recovery-port 9090 \
-  --snapshot-interval 1000 --snapshot-retention 8
+  --snapshot-interval 1000 --snapshot-retention 8 \
+  --recovery-policy round-robin
 ```
 
 The recovery listener binds to all IPv4 interfaces on the configured port. In
@@ -341,6 +342,12 @@ Request a retained checkpoint explicitly:
 The result is `OK` only when a retained checkpoint at or after sequence 1000
 exists. A snapshot is built from published price-level state, not by reading
 or serialising the matching engine directly.
+
+`--recovery-policy fcfs|round-robin` selects the shared TCP recovery queue
+policy. On clean shutdown, the exchange prints real listener counters,
+scheduled requests, recovered messages, queue-wait average/max, and the number
+of subscriber identities served. These values are measured service counters,
+not synthetic dashboard data.
 
 To exercise the full live subscriber path on a normal host, start this after
 the exchange:

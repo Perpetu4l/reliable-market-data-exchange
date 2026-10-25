@@ -25,6 +25,7 @@ struct PublisherConfig {
     // separate endpoint from order entry because recovery clients have a
     // different framed protocol.
     uint16_t recovery_port = 9090;
+    std::string recovery_scheduling_policy{"fcfs"};
 };
 }
 

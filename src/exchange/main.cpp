@@ -36,6 +36,7 @@ void print_usage(const char* program_name)
     std::cout << "  --snapshot-interval <N>  Create composite snapshot every N events (0 disables)\n";
     std::cout << "  --snapshot-retention <N> Number of snapshots retained (default: 8)\n";
     std::cout << "  --recovery-port <port>   Recovery TCP port (default: 9090; 0 disables)\n";
+    std::cout << "  --recovery-policy <name> Recovery scheduler: fcfs|round-robin (default: fcfs)\n";
     std::cout << "  --oe-port <port>         Order entry TCP port (default: "
                  "8080, client mode only)\n";
     std::cout << "  --help, -h               Show this help message\n";
@@ -103,6 +104,14 @@ int main(const int argc, char* argv[])
         else if (arg == "--recovery-port" && i + 1 < argc) {
             md_config.recovery_port = static_cast<uint16_t>(std::stoul(argv[++i]));
         }
+        else if (arg == "--recovery-policy" && i + 1 < argc) {
+            md_config.recovery_scheduling_policy = argv[++i];
+            if (md_config.recovery_scheduling_policy != "fcfs"
+                && md_config.recovery_scheduling_policy != "round-robin") {
+                std::cerr << "Invalid recovery policy: " << md_config.recovery_scheduling_policy << std::endl;
+                return 1;
+            }
+        }
         else if (arg == "--oe-port" && i + 1 < argc) {
             oe_port = static_cast<uint16_t>(std::stoul(argv[++i]));
         }
@@ -132,6 +141,7 @@ int main(const int argc, char* argv[])
     std::cout << "Recovery TCP: "
               << (md_config.recovery_port == 0 ? "disabled" : std::to_string(md_config.recovery_port))
               << std::endl;
+    std::cout << "Recovery scheduling policy: " << md_config.recovery_scheduling_policy << std::endl;
     if (md_config.dual_feed) {
         std::cout << "Market Data Feed B: " << md_config.feed_b_multicast_ip << ':'
                   << md_config.feed_b_multicast_port << std::endl;
