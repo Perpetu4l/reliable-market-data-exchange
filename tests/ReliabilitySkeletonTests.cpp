@@ -96,6 +96,7 @@ TEST(RecoveryWireTests, RoundTripsPartialFramedRequest)
     const auto decoded = RecoveryWireCodec::decode_request(frame->payload, error);
     ASSERT_TRUE(decoded.has_value()) << error;
     EXPECT_EQ(decoded->subscriber_id, source.subscriber_id);
+    EXPECT_EQ(decoded->request_id, 0U); // server-only correlation never crosses the wire
     EXPECT_EQ(decoded->missing_range.start_sequence, 10);
     EXPECT_EQ(decoded->missing_range.end_sequence, 20);
 }

@@ -33,6 +33,7 @@ void print_usage(const char* program_name)
     std::cout << "  --feed-b-port <port>     Feed B multicast port (default: 10000)\n";
     std::cout << "  --heartbeat-ms <ms>      Market-data heartbeat interval (default: 1000)\n";
     std::cout << "  --history <events>       Events retained for recovery (default: 65536; 0 disables)\n";
+    std::cout << "  --recovery-port <port>   Recovery TCP port (default: 9090; 0 disables)\n";
     std::cout << "  --oe-port <port>         Order entry TCP port (default: "
                  "8080, client mode only)\n";
     std::cout << "  --help, -h               Show this help message\n";
@@ -91,6 +92,9 @@ int main(const int argc, char* argv[])
         else if (arg == "--history" && i + 1 < argc) {
             md_config.recovery_history_events = std::stoull(argv[++i]);
         }
+        else if (arg == "--recovery-port" && i + 1 < argc) {
+            md_config.recovery_port = static_cast<uint16_t>(std::stoul(argv[++i]));
+        }
         else if (arg == "--oe-port" && i + 1 < argc) {
             oe_port = static_cast<uint16_t>(std::stoul(argv[++i]));
         }
@@ -115,6 +119,9 @@ int main(const int argc, char* argv[])
     std::cout << "MD Interface: " << md_config.interface_ip << std::endl;
     std::cout << "Recovery history: " << md_config.recovery_history_events
               << " events" << std::endl;
+    std::cout << "Recovery TCP: "
+              << (md_config.recovery_port == 0 ? "disabled" : std::to_string(md_config.recovery_port))
+              << std::endl;
     if (md_config.dual_feed) {
         std::cout << "Market Data Feed B: " << md_config.feed_b_multicast_ip << ':'
                   << md_config.feed_b_multicast_port << std::endl;

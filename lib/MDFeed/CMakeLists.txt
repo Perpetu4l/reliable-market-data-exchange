@@ -21,6 +21,7 @@ set(HEADER_FILES
         include/reliability/Sha256.h
         include/reliability/BookBuilder.h
         include/reliability/RecoveryWire.h
+        include/reliability/RecoveryTcp.h
 )
 
 set(SOURCE_FILES
@@ -40,6 +41,7 @@ set(SOURCE_FILES
         src/reliability/Sha256.cpp
         src/reliability/BookBuilder.cpp
         src/reliability/RecoveryWire.cpp
+        src/reliability/RecoveryTcp.cpp
 )
 
 add_library(MDFeed STATIC ${SOURCE_FILES} ${HEADER_FILES})

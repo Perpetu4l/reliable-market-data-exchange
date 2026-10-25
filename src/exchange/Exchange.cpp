@@ -11,6 +11,16 @@ Exchange::Exchange(const Mode mode, mdfeed::PublisherConfig md_config, const uin
     md_publisher_ = std::make_unique<mdfeed::MarketDataPublisher>(md_config_);
     recovery_history_ = std::make_shared<mdfeed::reliability::RecoveryHistory>(
         md_config_.recovery_history_events);
+    // Snapshots are not emitted over the recovery TCP wire yet. Keep this
+    // disabled store attached to the recovery service so the service boundary
+    // is stable while snapshot transfer is implemented separately.
+    snapshot_manager_ = std::make_shared<mdfeed::reliability::SnapshotManager>();
+    recovery_service_ = std::make_shared<mdfeed::reliability::RecoveryServer>(
+        recovery_history_, snapshot_manager_);
+    if (md_config_.recovery_port != 0) {
+        recovery_tcp_server_ = std::make_unique<mdfeed::reliability::RecoveryTcpServer>(
+            mdfeed::reliability::RecoveryTcpServer::Config{md_config_.recovery_port}, recovery_service_);
+    }
     multicast_thread_ = std::make_unique<
         mdfeed::MulticastPublisherThread>(md_publisher_->get_ring_buffer(), md_config_,
             [history = recovery_history_](const mdfeed::MessageBuffer& buffer) {
@@ -37,10 +47,21 @@ bool Exchange::start()
         std::cerr << "Failed to start multicast publisher thread" << std::endl;
         return false;
     }
+    if (recovery_tcp_server_) {
+        std::string recovery_error;
+        if (!recovery_tcp_server_->start(recovery_error)) {
+            std::cerr << "Failed to start recovery TCP server: " << recovery_error << std::endl;
+            multicast_thread_->stop();
+            return false;
+        }
+        std::cout << "Recovery TCP server listening on 0.0.0.0:"
+                  << recovery_tcp_server_->port() << std::endl;
+    }
     if (mode_ == Mode::CLIENT_ORDERS) {
         std::cout << "Starting Order Entry Server on port " << order_entry_port_ << "..." << std::endl;
         if (!order_server_->start()) {
             std::cerr << "Failed to start order entry server" << std::endl;
+            if (recovery_tcp_server_) recovery_tcp_server_->stop();
             multicast_thread_->stop();
             return false;
         }
@@ -66,6 +87,7 @@ void Exchange::stop()
     std::cout << "Stopping Enhanced Exchange..." << std::endl;
     running_.store(false);
     if (order_server_) { order_server_->stop(); }
+    if (recovery_tcp_server_) { recovery_tcp_server_->stop(); }
     if (multicast_thread_) { multicast_thread_->stop(); }
     print_final_stats();
 }

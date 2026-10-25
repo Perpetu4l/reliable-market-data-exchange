@@ -13,6 +13,9 @@ enum class RecoveryStatus { OK, TOO_OLD, BAD_REQUEST, ERROR };
 struct RecoveryRequest {
     std::string subscriber_id;
     MissingRange missing_range;
+    // Assigned by the TCP server after decoding. This is an in-process
+    // correlation token and is intentionally not part of the wire format.
+    uint64_t request_id{0};
 };
 
 struct RecoveryResponse {
