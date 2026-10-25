@@ -1,10 +1,12 @@
 # Recovery TCP protocol
 
-Status: codec implemented; no exchange listener or subscriber client is wired
-to it yet. This document is the contract for that next step.
+Status: the exchange hosts this listener when `--recovery-port` is non-zero
+(default `9090`) and `recovery_client` is a command-line request client.
+Automatic recovery from a live UDP subscriber and TCP snapshot transfer remain
+unimplemented.
 
-Recovery traffic uses TCP independently from order entry. The planned default
-port is `9100`. A TCP stream contains one or more frames:
+Recovery traffic uses TCP independently from order entry. The default port is
+`9090`. A TCP stream contains one or more frames:
 
 ```text
 u32 big-endian frame_payload_length
@@ -19,8 +21,8 @@ memory.
 
 | Type | Value | Status |
 | --- | ---: | --- |
-| `RECOVERY_REQUEST` | 1 | Codec implemented |
-| `RECOVERY_RESPONSE` | 2 | Codec implemented |
+| `RECOVERY_REQUEST` | 1 | Implemented and accepted by the exchange listener |
+| `RECOVERY_RESPONSE` | 2 | Implemented for retained-event replies |
 | `SNAPSHOT_REQUEST` | 3 | Reserved |
 | `SNAPSHOT_RESPONSE` | 4 | Reserved |
 | `STATUS_REQUEST` | 5 | Reserved |
@@ -52,5 +54,5 @@ bytes detail (UTF-8)
 
 The event bytes are the original binary market-data datagrams, preserving the
 existing packed `MessageHeader`; recovery does not translate or replace the
-market-data protocol. A future server must chunk ranges across frames instead
-of silently truncating them.
+market-data protocol. The current server rejects requests that would make the
+encoded reply exceed the frame limit instead of silently truncating them.

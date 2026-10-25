@@ -5,8 +5,8 @@ reliability harness to a measured live UDP/TCP implementation. It deliberately
 does not describe unavailable functionality as completed.
 
 - [x] Phase 0 — baseline current behaviour, portability cleanup, repository hygiene.
-- [ ] Phase 1 — correct sequence, gap, fault, snapshot/hash, and scheduler logic with unit tests.
-- [ ] Phase 2 — dual multicast transport, heartbeats, bounded history, and TCP recovery server in `exchange`.
+- [x] Phase 1 — correct sequence, gap, fault, snapshot/hash, and scheduler logic with unit tests.
+- [x] Phase 2 — dual multicast transport, heartbeats, bounded history, and TCP recovery server in `exchange`.
 - [ ] Phase 3 — real `subscriber` executable and loopback end-to-end test.
 - [ ] Phase 4 — headless multi-process experiment runner and provenance-preserving results.
 - [ ] Phase 5 — GUI control room wired only to live processes and collected CSVs.

@@ -212,8 +212,13 @@ void RecoveryTcpServer::worker_loop()
             pending = std::move(it->second);
             pending_requests_.erase(it);
         }
-        const auto response = recovery_service_->request_missing_data(scheduled->request);
-        const auto payload = RecoveryWireCodec::encode_response(response);
+        auto response = recovery_service_->request_missing_data(scheduled->request);
+        auto payload = RecoveryWireCodec::encode_response(response);
+        if (payload.size() + 1 > RecoveryWireCodec::MAX_FRAME_BYTES) {
+            response = {RecoveryStatus::ERROR, {}, std::nullopt,
+                "recovery response exceeds the maximum frame size"};
+            payload = RecoveryWireCodec::encode_response(response);
+        }
         const auto bytes = RecoveryWireCodec::frame(RecoveryWireType::RECOVERY_RESPONSE, payload);
         bool sent = false;
         {

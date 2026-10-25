@@ -21,11 +21,14 @@ it does **not** provide distributed consensus or replicated order books.
 - A separate-process `workload_client` that sends reproducible orders over
   real TCP sockets and reports client-measured acknowledgement RTT percentiles.
 - UDP multicast publishing of binary price-level, trade, and book-clear
-  events, with heartbeat processing. The protocol also defines snapshot message
-  types for the reliability layer.
+  events, with heartbeats. `--dual-feed` publishes the same bytes and sequence
+  numbers on independently configured Feed A and Feed B multicast endpoints.
 - UDP multicast receiver with message validation, sequence-gap statistics, and
   logging controls.
 - Lock-free SPSC market-data ring buffer.
+- A bounded publisher-side recovery history and a separate framed TCP recovery
+  endpoint. It uses the shared FCFS or Round-Robin scheduler and serves exact
+  retained binary datagrams; a request outside the window returns `TOO_OLD`.
 - C++ benchmarks and GoogleTest unit tests, including order-entry frame and
   queue-boundary checks.
 - Optional pybind11 bindings and PyQt6/pyqtgraph market simulator.
@@ -49,10 +52,14 @@ target named `reliability_demo`.
 - FCFS and Round Robin recovery scheduling in the deterministic demo, with
   per-subscriber service counters.
 
-The demonstration intentionally keeps recovery in one process so that loss,
+The demonstration intentionally keeps its own recovery in one process so that loss,
 seed, history, snapshot, and scheduling experiments are repeatable. The GUI
 runs this compiled demo and displays its emitted metrics; it is not labelled or
 presented as a live production multicast/recovery deployment.
+
+The normal `exchange` now exposes a separate live recovery TCP endpoint, but
+there is not yet a live UDP subscriber executable that automatically detects a
+gap and invokes it. Use `recovery_client` to verify retained ranges manually.
 
 ## Prerequisites
 
@@ -290,6 +297,34 @@ quit
 `order_client` waits for and prints the actual acknowledgement, rejection, or
 execution-report frame returned by the exchange. The exchange owns the shared
 order books; clients do not modify them directly.
+
+### Live dual-feed publishing and TCP recovery
+
+Start the exchange with two real multicast destinations and a bounded replay
+window. Feed A and Feed B carry the same original market-data datagrams.
+
+```sh
+./build-local/src/exchange --mode simulation --dual-feed \
+  --md-ip 239.1.1.1 --md-port 9999 \
+  --feed-b-ip 239.1.1.2 --feed-b-port 10000 \
+  --history 65536 --recovery-port 9090
+```
+
+The recovery listener binds to all IPv4 interfaces on the configured port. In
+another terminal, request a range that has already been published:
+
+```sh
+./build-local/src/recovery_client \
+  --server 127.0.0.1 --port 9090 --subscriber demo-client --start 1 --end 5
+```
+
+`Recovery status: OK` followed by original sequence numbers proves the TCP
+request/response path and publisher-retained history. `TOO_OLD` is the correct
+result for a range evicted from `--history`; it is not a successful recovery.
+The client accepts numeric IPv4 addresses, so replace `127.0.0.1` with the
+server machine's reachable LAN address for a remote test. This project does
+not yet provide TLS/authentication, TCP snapshot transfer, or automatic live
+subscriber recovery.
 
 ### Automatic local TCP workload
 
