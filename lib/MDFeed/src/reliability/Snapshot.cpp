@@ -18,17 +18,19 @@ void append_big_endian(std::vector<uint8_t>& output, const T value)
 std::string SnapshotHasher::compute_hash(const OrderBookSnapshot& snapshot, const std::string_view previous_hash) const
 {
     std::vector<uint8_t> material;
-    material.reserve(32 + snapshot.book_state.size() * 17 + previous_hash.size());
+    material.reserve(32 + snapshot.book_state.size() * 21 + previous_hash.size());
     append_big_endian(material, snapshot.sequence_number);
     append_big_endian(material, snapshot.instrument_id);
     append_big_endian(material, snapshot.timestamp_ns);
     auto levels = snapshot.book_state;
     std::sort(levels.begin(), levels.end(), [](const SnapshotPriceLevel& lhs, const SnapshotPriceLevel& rhs) {
+        if (lhs.instrument_id != rhs.instrument_id) return lhs.instrument_id < rhs.instrument_id;
         if (lhs.side != rhs.side) return static_cast<uint8_t>(lhs.side) < static_cast<uint8_t>(rhs.side);
         return lhs.price < rhs.price;
     });
     append_big_endian(material, static_cast<uint32_t>(levels.size()));
     for (const auto& level : levels) {
+        append_big_endian(material, level.instrument_id);
         append_big_endian(material, static_cast<uint8_t>(level.side));
         append_big_endian(material, level.price);
         append_big_endian(material, level.quantity);
@@ -78,6 +80,13 @@ std::optional<OrderBookSnapshot> SnapshotStore::for_sequence(const uint64_t sequ
     }
     return std::nullopt;
 }
+std::optional<OrderBookSnapshot> SnapshotStore::at_or_after(const uint64_t sequence) const
+{
+    for (const auto& snapshot : snapshots_) {
+        if (snapshot.sequence_number >= sequence) return snapshot;
+    }
+    return std::nullopt;
+}
 
 SnapshotManager::SnapshotManager(SnapshotConfig config) : config_(config), store_(config.retention_count) {}
 bool SnapshotManager::should_checkpoint(const uint64_t sequence) const
@@ -87,6 +96,7 @@ bool SnapshotManager::should_checkpoint(const uint64_t sequence) const
 OrderBookSnapshot SnapshotManager::create_snapshot(const uint64_t sequence, const uint32_t instrument_id,
     std::vector<SnapshotPriceLevel> book_state, const uint64_t timestamp_ns) const
 {
+    std::lock_guard lock(mutex_);
     OrderBookSnapshot snapshot;
     snapshot.sequence_number = sequence;
     snapshot.instrument_id = instrument_id;
@@ -96,9 +106,30 @@ OrderBookSnapshot SnapshotManager::create_snapshot(const uint64_t sequence, cons
     snapshot.hash = hasher_.compute_hash(snapshot, snapshot.previous_hash);
     return snapshot;
 }
-void SnapshotManager::store_snapshot(OrderBookSnapshot snapshot) { store_.store(std::move(snapshot)); }
-std::optional<OrderBookSnapshot> SnapshotManager::get_latest_snapshot() const { return store_.latest(); }
-std::optional<OrderBookSnapshot> SnapshotManager::get_snapshot_for_sequence(const uint64_t sequence) const { return store_.for_sequence(sequence); }
-bool SnapshotManager::verify_snapshots() const { return hasher_.verify_chain(store_.all()); }
+void SnapshotManager::store_snapshot(OrderBookSnapshot snapshot)
+{
+    std::lock_guard lock(mutex_);
+    store_.store(std::move(snapshot));
+}
+std::optional<OrderBookSnapshot> SnapshotManager::get_latest_snapshot() const
+{
+    std::lock_guard lock(mutex_);
+    return store_.latest();
+}
+std::optional<OrderBookSnapshot> SnapshotManager::get_snapshot_for_sequence(const uint64_t sequence) const
+{
+    std::lock_guard lock(mutex_);
+    return store_.for_sequence(sequence);
+}
+std::optional<OrderBookSnapshot> SnapshotManager::get_snapshot_at_or_after(const uint64_t sequence) const
+{
+    std::lock_guard lock(mutex_);
+    return store_.at_or_after(sequence);
+}
+bool SnapshotManager::verify_snapshots() const
+{
+    std::lock_guard lock(mutex_);
+    return hasher_.verify_chain(store_.all());
+}
 
 } // namespace mdfeed::reliability

@@ -117,4 +117,124 @@ std::optional<RecoveryResponse> RecoveryWireCodec::decode_response(const std::sp
     result.detail.assign(payload.begin() + at, payload.end()); return result;
 }
 
+std::vector<uint8_t> RecoveryWireCodec::encode_snapshot_request(const uint64_t minimum_sequence)
+{
+    std::vector<uint8_t> result;
+    put_u64(result, minimum_sequence);
+    return result;
+}
+
+std::optional<uint64_t> RecoveryWireCodec::decode_snapshot_request(
+    const std::span<const uint8_t> payload, std::string& error)
+{
+    error.clear();
+    size_t at = 0;
+    uint64_t sequence = 0;
+    if (!read_u64(payload, at, sequence) || at != payload.size() || sequence == 0) {
+        error = "invalid snapshot request";
+        return std::nullopt;
+    }
+    return sequence;
+}
+
+std::vector<uint8_t> RecoveryWireCodec::encode_snapshot_response(const RecoveryResponse& response)
+{
+    std::vector<uint8_t> result;
+    result.push_back(static_cast<uint8_t>(response.status));
+    if (response.status == RecoveryStatus::OK && response.snapshot) {
+        const auto& snapshot = *response.snapshot;
+        put_u64(result, snapshot.sequence_number);
+        put_u32(result, snapshot.instrument_id);
+        put_u64(result, snapshot.timestamp_ns);
+        put_u32(result, static_cast<uint32_t>(snapshot.book_state.size()));
+        for (const auto& level : snapshot.book_state) {
+            put_u32(result, level.instrument_id);
+            put_u64(result, level.price);
+            put_u64(result, level.quantity);
+            result.push_back(static_cast<uint8_t>(level.side));
+        }
+        put_u16(result, static_cast<uint16_t>(std::min<size_t>(snapshot.previous_hash.size(), UINT16_MAX)));
+        result.insert(result.end(), snapshot.previous_hash.begin(), snapshot.previous_hash.begin()
+            + std::min<size_t>(snapshot.previous_hash.size(), UINT16_MAX));
+        put_u16(result, static_cast<uint16_t>(std::min<size_t>(snapshot.hash.size(), UINT16_MAX)));
+        result.insert(result.end(), snapshot.hash.begin(), snapshot.hash.begin()
+            + std::min<size_t>(snapshot.hash.size(), UINT16_MAX));
+    } else {
+        put_u64(result, 0);
+        put_u32(result, 0);
+        put_u64(result, 0);
+        put_u32(result, 0);
+        put_u16(result, 0);
+        put_u16(result, 0);
+    }
+    const auto detail_size = std::min<size_t>(response.detail.size(), UINT16_MAX);
+    put_u16(result, static_cast<uint16_t>(detail_size));
+    result.insert(result.end(), response.detail.begin(), response.detail.begin() + detail_size);
+    return result;
+}
+
+std::optional<RecoveryResponse> RecoveryWireCodec::decode_snapshot_response(
+    const std::span<const uint8_t> payload, std::string& error)
+{
+    error.clear();
+    size_t at = 0;
+    if (payload.empty() || payload[0] > static_cast<uint8_t>(RecoveryStatus::ERROR)) {
+        error = "invalid snapshot response";
+        return std::nullopt;
+    }
+    RecoveryResponse result;
+    result.status = static_cast<RecoveryStatus>(payload[at++]);
+    OrderBookSnapshot snapshot;
+    uint32_t level_count = 0;
+    if (!read_u64(payload, at, snapshot.sequence_number) || !read_u32(payload, at, snapshot.instrument_id)
+        || !read_u64(payload, at, snapshot.timestamp_ns) || !read_u32(payload, at, level_count)
+        || level_count > 65536) {
+        error = "truncated snapshot response";
+        return std::nullopt;
+    }
+    snapshot.book_state.reserve(level_count);
+    for (uint32_t index = 0; index < level_count; ++index) {
+        SnapshotPriceLevel level;
+        uint8_t side = 0;
+        if (!read_u32(payload, at, level.instrument_id) || !read_u64(payload, at, level.price)
+            || !read_u64(payload, at, level.quantity) || at >= payload.size()) {
+            error = "truncated snapshot level";
+            return std::nullopt;
+        }
+        side = payload[at++];
+        if (side != static_cast<uint8_t>(Side::BUY) && side != static_cast<uint8_t>(Side::SELL)) {
+            error = "invalid snapshot side";
+            return std::nullopt;
+        }
+        level.side = static_cast<Side>(side);
+        snapshot.book_state.push_back(level);
+    }
+    uint16_t previous_size = 0, hash_size = 0, detail_size = 0;
+    if (!read_u16(payload, at, previous_size) || payload.size() - at < previous_size) {
+        error = "truncated snapshot previous hash";
+        return std::nullopt;
+    }
+    snapshot.previous_hash.assign(payload.begin() + at, payload.begin() + at + previous_size);
+    at += previous_size;
+    if (!read_u16(payload, at, hash_size) || payload.size() - at < hash_size) {
+        error = "truncated snapshot hash";
+        return std::nullopt;
+    }
+    snapshot.hash.assign(payload.begin() + at, payload.begin() + at + hash_size);
+    at += hash_size;
+    if (!read_u16(payload, at, detail_size) || payload.size() - at != detail_size) {
+        error = "malformed snapshot detail";
+        return std::nullopt;
+    }
+    result.detail.assign(payload.begin() + at, payload.end());
+    if (result.status == RecoveryStatus::OK) {
+        if (snapshot.sequence_number == 0 || snapshot.hash.empty()) {
+            error = "successful snapshot response has no snapshot";
+            return std::nullopt;
+        }
+        result.snapshot = std::move(snapshot);
+    }
+    return result;
+}
+
 } // namespace mdfeed::reliability

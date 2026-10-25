@@ -17,7 +17,7 @@ RecoveryResponse RecoveryServer::request_missing_data(const RecoveryRequest& req
 RecoveryResponse RecoveryServer::send_snapshot(const uint64_t sequence) const
 {
     if (!snapshots_) return {RecoveryStatus::ERROR, {}, std::nullopt, "snapshot service unavailable"};
-    const auto snapshot = snapshots_->get_snapshot_for_sequence(sequence);
+    const auto snapshot = snapshots_->get_snapshot_at_or_after(sequence);
     if (!snapshot) return {RecoveryStatus::TOO_OLD, {}, std::nullopt, "no retained snapshot for sequence"};
     return {RecoveryStatus::OK, {}, snapshot, {}};
 }

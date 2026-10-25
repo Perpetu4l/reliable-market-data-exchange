@@ -1,6 +1,8 @@
 #include "receiver/MulticastReceiver.h"
 #include "reliability/DualFeed.h"
 #include "reliability/RecoveryTcp.h"
+#include "reliability/BookBuilder.h"
+#include "reliability/Snapshot.h"
 
 #include <atomic>
 #include <csignal>
@@ -94,9 +96,13 @@ int main(const int argc, char* argv[])
     std::atomic<uint64_t> delivered{0};
     std::atomic<uint64_t> recovery_requests{0};
     std::atomic<uint64_t> recovery_failures{0};
+    std::atomic<uint64_t> snapshot_recoveries{0};
+    BookBuilder local_book;
+    SnapshotHasher snapshot_hasher;
     std::unique_ptr<DualFeedSubscriber> subscriber;
     subscriber = std::make_unique<DualFeedSubscriber>(
         [&](const MarketDataEvent& event) {
+            (void)local_book.apply(event);
             ++delivered;
             std::cout << "DELIVERED seq=" << event.header.sequence_number
                       << " feed=" << (event.feed_id == FeedId::A ? 'A' : 'B')
@@ -107,16 +113,38 @@ int main(const int argc, char* argv[])
             RecoveryTcpClient client(config.recovery);
             std::string error;
             const auto response = client.request_missing_data({config.subscriber_id, range}, error);
-            if (!response || response->status != RecoveryStatus::OK) {
+            if (response && response->status == RecoveryStatus::OK) {
+                std::cout << "RECOVERY OK range=" << range.start_sequence << '-'
+                          << range.end_sequence << " events=" << response->events.size() << '\n';
+                for (auto event : response->events) subscriber->on_recovered_event(std::move(event));
+                return;
+            }
+            if (response && response->status == RecoveryStatus::TOO_OLD) {
+                const auto snapshot_response = client.request_snapshot(range.end_sequence, error);
+                if (snapshot_response && snapshot_response->status == RecoveryStatus::OK
+                    && snapshot_response->snapshot && snapshot_hasher.verify(*snapshot_response->snapshot)) {
+                    local_book.apply_snapshot(*snapshot_response->snapshot);
+                    subscriber->resynchronise_after_snapshot(
+                        snapshot_response->snapshot->sequence_number);
+                    ++snapshot_recoveries;
+                    std::cout << "SNAPSHOT RECOVERY OK checkpoint="
+                              << snapshot_response->snapshot->sequence_number << " hash="
+                              << snapshot_response->snapshot->hash << '\n';
+                    return;
+                }
+                ++recovery_failures;
+                std::cerr << "SNAPSHOT RECOVERY FAILED range=" << range.start_sequence << '-'
+                          << range.end_sequence << ": "
+                          << (!snapshot_response ? error : snapshot_response->detail) << '\n';
+                return;
+            }
+            {
                 ++recovery_failures;
                 std::cerr << "RECOVERY FAILED range=" << range.start_sequence << '-'
                           << range.end_sequence << ": "
                           << (!response ? error : response->detail) << '\n';
                 return;
             }
-            std::cout << "RECOVERY OK range=" << range.start_sequence << '-'
-                      << range.end_sequence << " events=" << response->events.size() << '\n';
-            for (auto event : response->events) subscriber->on_recovered_event(std::move(event));
         });
 
     MulticastReceiver receiver_a(config.feed_a);
@@ -155,6 +183,7 @@ int main(const int argc, char* argv[])
     std::cout << "SUMMARY delivered=" << delivered << " duplicates="
               << subscriber->sequence_tracker().duplicate_count() << " gaps="
               << subscriber->sequence_tracker().gap_count() << " recovery_requests="
-              << recovery_requests << " recovery_failures=" << recovery_failures << '\n';
+              << recovery_requests << " snapshot_recoveries=" << snapshot_recoveries
+              << " recovery_failures=" << recovery_failures << '\n';
     return 0;
 }

@@ -60,8 +60,10 @@ presented as a live production multicast/recovery deployment.
 The normal `exchange` now exposes a separate live recovery TCP endpoint, and
 `reliable_subscriber` joins Feed A (and optionally Feed B), performs
 first-copy-wins sequencing, and requests retained gaps over that endpoint.
-Use `recovery_client` to verify a retained range manually. TCP snapshot
-transfer remains unavailable when the history window is too old.
+Use `recovery_client` to verify a retained range or a checkpoint manually.
+When history is too old, the subscriber requests the first retained composite
+snapshot at or after the missing sequence, verifies its SHA-256 checkpoint
+hash, applies its absolute market-data levels, and resynchronises.
 
 ## Prerequisites
 
@@ -309,7 +311,8 @@ window. Feed A and Feed B carry the same original market-data datagrams.
 ./build-local/src/exchange --mode simulation --dual-feed \
   --md-ip 239.1.1.1 --md-port 9999 \
   --feed-b-ip 239.1.1.2 --feed-b-port 10000 \
-  --history 65536 --recovery-port 9090
+  --history 65536 --recovery-port 9090 \
+  --snapshot-interval 1000 --snapshot-retention 8
 ```
 
 The recovery listener binds to all IPv4 interfaces on the configured port. In
@@ -325,8 +328,19 @@ request/response path and publisher-retained history. `TOO_OLD` is the correct
 result for a range evicted from `--history`; it is not a successful recovery.
 The client accepts numeric IPv4 addresses, so replace `127.0.0.1` with the
 server machine's reachable LAN address for a remote test. This project does
-not yet provide TLS/authentication, TCP snapshot transfer, or automatic live
-subscriber recovery.
+not yet provide TLS/authentication, persistent checkpoints, or replay of
+events after a snapshot checkpoint.
+
+Request a retained checkpoint explicitly:
+
+```sh
+./build-local/src/recovery_client \
+  --server 127.0.0.1 --port 9090 --snapshot-min-sequence 1000
+```
+
+The result is `OK` only when a retained checkpoint at or after sequence 1000
+exists. A snapshot is built from published price-level state, not by reading
+or serialising the matching engine directly.
 
 To exercise the full live subscriber path on a normal host, start this after
 the exchange:

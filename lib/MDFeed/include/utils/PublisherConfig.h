@@ -19,6 +19,8 @@ struct PublisherConfig {
     // Number of published (non-heartbeat) market-data messages retained for
     // subscriber-initiated TCP recovery.  Zero disables in-memory recovery.
     size_t recovery_history_events = 65536;
+    uint64_t snapshot_interval_events = 0;
+    size_t snapshot_retention_count = 8;
     // TCP recovery is enabled when this is non-zero. It is intentionally a
     // separate endpoint from order entry because recovery clients have a
     // different framed protocol.

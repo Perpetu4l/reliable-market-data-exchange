@@ -17,6 +17,8 @@ class BookBuilder {
 public:
     [[nodiscard]] bool apply(const MarketDataEvent& event);
     [[nodiscard]] std::vector<SnapshotPriceLevel> levels(uint32_t instrument_id) const;
+    [[nodiscard]] std::vector<SnapshotPriceLevel> all_levels() const;
+    void apply_snapshot(const OrderBookSnapshot& snapshot);
     [[nodiscard]] uint64_t last_sequence() const { return last_sequence_; }
     void clear();
 

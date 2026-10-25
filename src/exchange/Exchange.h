@@ -9,6 +9,7 @@
 #include "reliability/RecoveryHistory.h"
 #include "reliability/RecoveryProtocol.h"
 #include "reliability/RecoveryTcp.h"
+#include "reliability/BookBuilder.h"
 #include <atomic>
 #include <iostream>
 #include <memory>
@@ -30,6 +31,7 @@ private:
     mdfeed::PublisherConfig md_config_;
     std::shared_ptr<mdfeed::reliability::RecoveryHistory> recovery_history_;
     std::shared_ptr<mdfeed::reliability::SnapshotManager> snapshot_manager_;
+    std::shared_ptr<mdfeed::reliability::BookBuilder> market_data_book_builder_;
     std::shared_ptr<mdfeed::reliability::RecoveryServer> recovery_service_;
     std::unique_ptr<mdfeed::reliability::RecoveryTcpServer> recovery_tcp_server_;
 

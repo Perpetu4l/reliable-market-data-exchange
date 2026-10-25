@@ -49,10 +49,32 @@ std::vector<SnapshotPriceLevel> BookBuilder::levels(const uint32_t instrument_id
     if (const auto found = books_.find(instrument_id); found != books_.end()) {
         result.reserve(found->second.size());
         for (const auto& [key, quantity] : found->second) {
-            result.push_back({key.second, quantity, static_cast<Side>(key.first)});
+            result.push_back({key.second, quantity, static_cast<Side>(key.first), instrument_id});
         }
     }
     return result;
+}
+
+std::vector<SnapshotPriceLevel> BookBuilder::all_levels() const
+{
+    std::vector<SnapshotPriceLevel> result;
+    for (const auto& [instrument, levels] : books_) {
+        for (const auto& [key, quantity] : levels) {
+            result.push_back({key.second, quantity, static_cast<Side>(key.first), instrument});
+        }
+    }
+    return result;
+}
+
+void BookBuilder::apply_snapshot(const OrderBookSnapshot& snapshot)
+{
+    clear();
+    for (const auto& level : snapshot.book_state) {
+        const auto instrument = level.instrument_id == 0 ? snapshot.instrument_id : level.instrument_id;
+        if (instrument == 0) continue;
+        books_[instrument][{static_cast<uint8_t>(level.side), level.price}] = level.quantity;
+    }
+    last_sequence_ = snapshot.sequence_number;
 }
 
 void BookBuilder::clear()

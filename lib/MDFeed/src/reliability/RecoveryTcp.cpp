@@ -169,6 +169,31 @@ void RecoveryTcpServer::client_loop(std::shared_ptr<Connection> connection)
                 break;
             }
             if (!frame) break;
+            if (frame->type == RecoveryWireType::SNAPSHOT_REQUEST) {
+                const auto sequence = RecoveryWireCodec::decode_snapshot_request(frame->payload, error);
+                if (!sequence) {
+                    record_malformed();
+                    continue;
+                }
+                auto response = recovery_service_->send_snapshot(*sequence);
+                auto payload = RecoveryWireCodec::encode_snapshot_response(response);
+                if (payload.size() + 1 > RecoveryWireCodec::MAX_FRAME_BYTES) {
+                    response = {RecoveryStatus::ERROR, {}, std::nullopt,
+                        "snapshot response exceeds the maximum frame size"};
+                    payload = RecoveryWireCodec::encode_snapshot_response(response);
+                }
+                const auto response_frame = RecoveryWireCodec::frame(
+                    RecoveryWireType::SNAPSHOT_RESPONSE, payload);
+                bool sent = false;
+                {
+                    std::lock_guard write_lock(connection->write_mutex);
+                    if (connection->open.load()) sent = send_all(connection->fd, response_frame);
+                }
+                std::lock_guard stats_lock(stats_mutex_);
+                if (sent) ++stats_.responses_sent;
+                else ++stats_.send_failures;
+                continue;
+            }
             if (frame->type != RecoveryWireType::RECOVERY_REQUEST) {
                 record_malformed();
                 continue;
@@ -296,6 +321,68 @@ std::optional<RecoveryResponse> RecoveryTcpClient::request_missing_data(
             return std::nullopt;
         }
         const auto response = RecoveryWireCodec::decode_response(frame->payload, error);
+        close_socket(fd);
+        return response;
+    }
+}
+
+std::optional<RecoveryResponse> RecoveryTcpClient::request_snapshot(
+    const uint64_t minimum_sequence, std::string& error) const
+{
+    error.clear();
+    const auto fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) {
+        error = std::string("could not create recovery client socket: ") + std::strerror(errno);
+        return std::nullopt;
+    }
+    timeval timeout{};
+    timeout.tv_sec = static_cast<time_t>(endpoint_.timeout_ms / 1000);
+    timeout.tv_usec = static_cast<suseconds_t>((endpoint_.timeout_ms % 1000) * 1000);
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(endpoint_.port);
+    if (inet_pton(AF_INET, endpoint_.host.c_str(), &address.sin_addr) != 1) {
+        error = "recovery endpoint must be an IPv4 numeric address";
+        close_socket(fd);
+        return std::nullopt;
+    }
+    if (connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) < 0) {
+        error = std::string("could not connect to recovery endpoint ") + endpoint_.host + ':'
+            + std::to_string(endpoint_.port) + ": " + std::strerror(errno);
+        close_socket(fd);
+        return std::nullopt;
+    }
+    const auto bytes = RecoveryWireCodec::frame(RecoveryWireType::SNAPSHOT_REQUEST,
+        RecoveryWireCodec::encode_snapshot_request(minimum_sequence));
+    if (!send_all(fd, bytes)) {
+        error = std::string("could not send snapshot request: ") + std::strerror(errno);
+        close_socket(fd);
+        return std::nullopt;
+    }
+    std::vector<uint8_t> stream;
+    uint8_t buffer[4096];
+    while (true) {
+        const auto received = recv(fd, buffer, sizeof(buffer), 0);
+        if (received <= 0) {
+            error = std::string("snapshot response was not received: ") + std::strerror(errno);
+            close_socket(fd);
+            return std::nullopt;
+        }
+        stream.insert(stream.end(), buffer, buffer + received);
+        const auto frame = RecoveryWireCodec::take_frame(stream, error);
+        if (!error.empty()) {
+            close_socket(fd);
+            return std::nullopt;
+        }
+        if (!frame) continue;
+        if (frame->type != RecoveryWireType::SNAPSHOT_RESPONSE) {
+            error = "unexpected snapshot response frame";
+            close_socket(fd);
+            return std::nullopt;
+        }
+        const auto response = RecoveryWireCodec::decode_snapshot_response(frame->payload, error);
         close_socket(fd);
         return response;
     }

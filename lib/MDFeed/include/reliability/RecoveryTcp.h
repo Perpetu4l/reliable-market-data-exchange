@@ -85,6 +85,8 @@ public:
     explicit RecoveryTcpClient(Endpoint endpoint) : endpoint_(std::move(endpoint)) {}
     [[nodiscard]] std::optional<RecoveryResponse> request_missing_data(
         const RecoveryRequest& request, std::string& error) const;
+    [[nodiscard]] std::optional<RecoveryResponse> request_snapshot(
+        uint64_t minimum_sequence, std::string& error) const;
 
 private:
     Endpoint endpoint_;

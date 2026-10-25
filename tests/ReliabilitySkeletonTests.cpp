@@ -121,6 +121,22 @@ TEST(RecoveryWireTests, RejectsOversizedFrame)
     EXPECT_EQ(error, "invalid recovery frame length");
 }
 
+TEST(RecoveryWireTests, RoundTripsVerifiableCompositeSnapshot)
+{
+    SnapshotManager manager({1, 4, true});
+    auto snapshot = manager.create_snapshot(10, 0,
+        {{100, 2, Side::BUY, 7}, {101, 3, Side::SELL, 8}}, 1234);
+    RecoveryResponse source{RecoveryStatus::OK, {}, snapshot, {}};
+    const auto payload = RecoveryWireCodec::encode_snapshot_response(source);
+    std::string error;
+    const auto decoded = RecoveryWireCodec::decode_snapshot_response(payload, error);
+    ASSERT_TRUE(decoded.has_value()) << error;
+    ASSERT_TRUE(decoded->snapshot.has_value());
+    EXPECT_EQ(decoded->snapshot->sequence_number, 10U);
+    EXPECT_EQ(decoded->snapshot->book_state.size(), 2U);
+    EXPECT_TRUE(SnapshotHasher{}.verify(*decoded->snapshot));
+}
+
 TEST(DualFeedSubscriberTests, ReplaysGapBeforeBufferedLaterEvent)
 {
     auto history = std::make_shared<RecoveryHistory>(10);
@@ -189,6 +205,16 @@ TEST(SnapshotManagerTests, RejectsTamperedSnapshot)
     ++snapshot.book_state.front().quantity;
     manager.store_snapshot(std::move(snapshot));
     EXPECT_FALSE(manager.verify_snapshots());
+}
+
+TEST(SnapshotManagerTests, FindsCheckpointAtOrAfterRecoveryRange)
+{
+    SnapshotManager manager({1, 4, true});
+    manager.store_snapshot(manager.create_snapshot(10, 0, {}, 10));
+    manager.store_snapshot(manager.create_snapshot(20, 0, {}, 20));
+    const auto snapshot = manager.get_snapshot_at_or_after(15);
+    ASSERT_TRUE(snapshot.has_value());
+    EXPECT_EQ(snapshot->sequence_number, 20U);
 }
 
 TEST(BookBuilderTests, AppliesAbsolutePriceLevelUpdatesAndDeletes)

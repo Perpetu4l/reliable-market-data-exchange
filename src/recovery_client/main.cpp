@@ -22,7 +22,9 @@ void usage(const char* program)
 {
     std::cout << "Usage: " << program
               << " --server <IPv4> --start <sequence> --end <sequence>"
-                 " [--port <recovery-port>] [--subscriber <id>]\n";
+                 " [--port <recovery-port>] [--subscriber <id>]\n"
+              << "   or: " << program << " --server <IPv4> --snapshot-min-sequence <sequence>"
+                 " [--port <recovery-port>]\n";
 }
 } // namespace
 
@@ -31,6 +33,7 @@ int main(const int argc, char* argv[])
     RecoveryTcpClient::Endpoint endpoint;
     std::string subscriber_id{"recovery-cli"};
     MissingRange range;
+    uint64_t snapshot_minimum_sequence = 0;
     bool have_server = false;
     for (int index = 1; index < argc; ++index) {
         const std::string argument = argv[index];
@@ -48,25 +51,34 @@ int main(const int argc, char* argv[])
         else if (argument == "--subscriber") subscriber_id = value;
         else if (argument == "--start") range.start_sequence = std::stoull(value);
         else if (argument == "--end") range.end_sequence = std::stoull(value);
+        else if (argument == "--snapshot-min-sequence") snapshot_minimum_sequence = std::stoull(value);
         else {
             usage(argv[0]);
             return EXIT_FAILURE;
         }
     }
-    if (!have_server || !range.valid()) {
+    if (!have_server || (snapshot_minimum_sequence == 0 && !range.valid())
+        || (snapshot_minimum_sequence != 0 && range.valid())) {
         usage(argv[0]);
         return EXIT_FAILURE;
     }
 
     RecoveryTcpClient client(endpoint);
     std::string error;
-    const auto response = client.request_missing_data({subscriber_id, range}, error);
+    const auto response = snapshot_minimum_sequence != 0
+        ? client.request_snapshot(snapshot_minimum_sequence, error)
+        : client.request_missing_data({subscriber_id, range}, error);
     if (!response) {
         std::cerr << "Recovery request failed: " << error << '\n';
         return EXIT_FAILURE;
     }
     std::cout << "Recovery status: " << status_name(response->status) << '\n';
     if (!response->detail.empty()) std::cout << "Detail: " << response->detail << '\n';
+    if (response->snapshot) {
+        std::cout << "Snapshot checkpoint: " << response->snapshot->sequence_number
+                  << " levels=" << response->snapshot->book_state.size()
+                  << " hash=" << response->snapshot->hash << '\n';
+    }
     std::cout << "Recovered events: " << response->events.size() << '\n';
     for (const auto& event : response->events) {
         std::cout << "  seq=" << event.header.sequence_number

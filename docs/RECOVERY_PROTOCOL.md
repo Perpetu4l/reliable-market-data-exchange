@@ -3,7 +3,8 @@
 Status: the exchange hosts this listener when `--recovery-port` is non-zero
 (default `9090`), `recovery_client` is a command-line request client, and
 `reliable_subscriber` invokes it after a live UDP sequence gap. TCP snapshot
-transfer remains unimplemented.
+transfer is implemented for in-memory composite checkpoints. There is no
+persistent store, authentication, encryption, or snapshot catch-up replay yet.
 
 Recovery traffic uses TCP independently from order entry. The default port is
 `9090`. A TCP stream contains one or more frames:
@@ -23,8 +24,8 @@ memory.
 | --- | ---: | --- |
 | `RECOVERY_REQUEST` | 1 | Implemented and accepted by the exchange listener |
 | `RECOVERY_RESPONSE` | 2 | Implemented for retained-event replies |
-| `SNAPSHOT_REQUEST` | 3 | Reserved |
-| `SNAPSHOT_RESPONSE` | 4 | Reserved |
+| `SNAPSHOT_REQUEST` | 3 | Implemented |
+| `SNAPSHOT_RESPONSE` | 4 | Implemented for in-memory checkpoints |
 | `STATUS_REQUEST` | 5 | Reserved |
 | `STATUS_RESPONSE` | 6 | Reserved |
 
@@ -56,3 +57,37 @@ The event bytes are the original binary market-data datagrams, preserving the
 existing packed `MessageHeader`; recovery does not translate or replace the
 market-data protocol. The current server rejects requests that would make the
 encoded reply exceed the frame limit instead of silently truncating them.
+
+## Snapshot request and response
+
+A snapshot request has one field:
+
+```text
+u64 minimum_sequence
+```
+
+The exchange returns the earliest retained checkpoint at or after that
+sequence. Returning an earlier checkpoint would leave an unreplayed portion of
+the requested gap and is therefore unsafe. A successful response contains the
+checkpoint sequence, timestamp, its SHA-256 hash-chain fields, and each
+absolute price level:
+
+```text
+u8  status
+u64 checkpoint_sequence
+u32 snapshot_instrument_id       # 0 for a composite multi-instrument snapshot
+u64 timestamp_ns
+u32 level_count
+repeat level_count:
+  u32 instrument_id
+  u64 price_in_cents
+  u64 aggregate_quantity
+  u8  side                       # BUY=1, SELL=2
+u16 previous_hash_length; bytes previous_hash
+u16 hash_length;          bytes hash
+u16 detail_length;        bytes detail
+```
+
+`reliable_subscriber` verifies the checkpoint hash, applies its absolute price
+levels to its local market-data book, and only then advances sequence
+continuity. A bad hash is a recovery failure, not a successful resync.

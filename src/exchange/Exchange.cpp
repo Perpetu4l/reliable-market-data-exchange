@@ -11,10 +11,10 @@ Exchange::Exchange(const Mode mode, mdfeed::PublisherConfig md_config, const uin
     md_publisher_ = std::make_unique<mdfeed::MarketDataPublisher>(md_config_);
     recovery_history_ = std::make_shared<mdfeed::reliability::RecoveryHistory>(
         md_config_.recovery_history_events);
-    // Snapshots are not emitted over the recovery TCP wire yet. Keep this
-    // disabled store attached to the recovery service so the service boundary
-    // is stable while snapshot transfer is implemented separately.
-    snapshot_manager_ = std::make_shared<mdfeed::reliability::SnapshotManager>();
+    snapshot_manager_ = std::make_shared<mdfeed::reliability::SnapshotManager>(
+        mdfeed::reliability::SnapshotConfig{md_config_.snapshot_interval_events,
+            md_config_.snapshot_retention_count, md_config_.snapshot_interval_events != 0});
+    market_data_book_builder_ = std::make_shared<mdfeed::reliability::BookBuilder>();
     recovery_service_ = std::make_shared<mdfeed::reliability::RecoveryServer>(
         recovery_history_, snapshot_manager_);
     if (md_config_.recovery_port != 0) {
@@ -23,13 +23,18 @@ Exchange::Exchange(const Mode mode, mdfeed::PublisherConfig md_config, const uin
     }
     multicast_thread_ = std::make_unique<
         mdfeed::MulticastPublisherThread>(md_publisher_->get_ring_buffer(), md_config_,
-            [history = recovery_history_](const mdfeed::MessageBuffer& buffer) {
+            [history = recovery_history_, snapshots = snapshot_manager_, books = market_data_book_builder_]
+            (const mdfeed::MessageBuffer& buffer) {
                 if (buffer.length < sizeof(mdfeed::MessageHeader)) return;
                 mdfeed::reliability::MarketDataEvent event;
                 std::memcpy(&event.header, buffer.data, sizeof(event.header));
                 event.payload.assign(reinterpret_cast<const uint8_t*>(buffer.data),
                     reinterpret_cast<const uint8_t*>(buffer.data) + buffer.length);
-                history->append(std::move(event));
+                history->append(event);
+                if (books->apply(event) && snapshots->should_checkpoint(event.header.sequence_number)) {
+                    snapshots->store_snapshot(snapshots->create_snapshot(event.header.sequence_number,
+                        0, books->all_levels(), event.header.timestamp_ns));
+                }
             });
 
     symbol_manager_ = std::make_unique<SymbolManager>(*md_publisher_);
