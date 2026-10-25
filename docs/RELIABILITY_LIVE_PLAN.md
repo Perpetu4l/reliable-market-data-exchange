@@ -8,7 +8,7 @@ does not describe unavailable functionality as completed.
 - [x] Phase 1 — correct sequence, gap, fault, snapshot/hash, and scheduler logic with unit tests.
 - [x] Phase 2 — dual multicast transport, heartbeats, bounded history, and TCP recovery server in `exchange`.
 - [ ] Phase 3 — real `reliable_subscriber` executable, live TCP replay, and checkpoint fallback (implemented); loopback end-to-end test remains blocked by this sandbox's socket policy.
-- [ ] Phase 4 — headless multi-process experiment runner and provenance-preserving results.
+- [ ] Phase 4 — headless multi-process experiment runner and provenance-preserving JSON results (implemented); a successful live socket run remains blocked by this sandbox's socket policy.
 - [ ] Phase 5 — GUI control room wired only to live processes and collected CSVs.
 - [ ] Phase 6 — make the in-process baseline use the shared correctness library and declare provenance.
 - [ ] Phase 7 — protocol, live-testing, design-errata, README, and verification documentation.

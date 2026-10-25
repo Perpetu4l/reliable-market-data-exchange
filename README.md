@@ -376,6 +376,29 @@ fault stage when testing loss. This sandbox blocks socket binding, so this
 live path was compiled and its startup-error handling was checked here, but it
 must be run on a normal macOS/Linux host for multicast/TCP end-to-end proof.
 
+### One-command local live experiment
+
+The headless runner starts the real exchange and `reliable_subscriber` as
+separate local processes, waits for the recovery listener to announce readiness,
+then saves a JSON result with exact configuration, actual subscriber counters,
+and bounded process-log tails. Build first, then run:
+
+```sh
+python3 src/reliability_runner/live_reliability_runner.py \
+  --build-dir build-local --duration 15 --dual-feed \
+  --feed-a-loss 0.20 --feed-b-loss 0.20 --fault-seed 7 \
+  --snapshot-interval 10 --history 5 --recovery-policy round-robin
+```
+
+The command returns success only when the exchange recovery listener became
+ready and the subscriber parsed a real result containing delivered events. It
+saves both successful and failed runs under `results/live-reliability-*.json`.
+For a fair baseline comparison, repeat with the same duration, seed, history,
+snapshot settings, and policy but set both feed loss rates to `0`. The runner
+has been checked here through its real failure path; sandbox policy prevents it
+from opening the TCP listener, so successful socket execution still needs a
+normal host.
+
 ### Automatic local TCP workload
 
 Start the exchange in one terminal:

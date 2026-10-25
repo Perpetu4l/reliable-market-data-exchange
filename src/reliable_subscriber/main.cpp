@@ -10,6 +10,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <optional>
 
 namespace {
 using namespace mdfeed;
@@ -29,6 +30,7 @@ struct Config {
     bool dual_feed{false};
     RecoveryTcpClient::Endpoint recovery;
     std::string subscriber_id{"reliable-subscriber"};
+    uint64_t run_seconds{0};
 };
 
 void usage(const char* program)
@@ -42,7 +44,8 @@ void usage(const char* program)
               << "  --interface <IPv4>        Local multicast interface (default: 127.0.0.1)\n"
               << "  --recovery-server <IPv4>  Exchange recovery server (default: 127.0.0.1)\n"
               << "  --recovery-port <port>    Recovery TCP port (default: 9090)\n"
-              << "  --subscriber <id>         Recovery subscriber identity\n";
+              << "  --subscriber <id>         Recovery subscriber identity\n"
+              << "  --run-seconds <N>         Exit after N seconds (0 waits for Ctrl+C)\n";
 }
 
 bool parse_args(int argc, char* argv[], Config& config)
@@ -61,6 +64,7 @@ bool parse_args(int argc, char* argv[], Config& config)
         else if (argument == "--recovery-server") config.recovery.host = value;
         else if (argument == "--recovery-port") config.recovery.port = static_cast<uint16_t>(std::stoul(value));
         else if (argument == "--subscriber") config.subscriber_id = value;
+        else if (argument == "--run-seconds") config.run_seconds = std::stoull(value);
         else return false;
     }
     // Dual reconciliation owns sequencing; disable each single-feed receiver's
@@ -177,7 +181,12 @@ int main(const int argc, char* argv[])
     if (receiver_b) std::cout << " Feed B=" << config.feed_b.multicast_ip << ':' << config.feed_b.multicast_port;
     std::cout << " recovery=" << config.recovery.host << ':' << config.recovery.port << '\n';
 
-    while (keep_running.load()) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    const auto deadline = config.run_seconds == 0
+        ? std::optional<std::chrono::steady_clock::time_point>{}
+        : std::optional{std::chrono::steady_clock::now() + std::chrono::seconds(config.run_seconds)};
+    while (keep_running.load() && (!deadline || std::chrono::steady_clock::now() < *deadline)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
     receiver_a.stop();
     if (receiver_b) receiver_b->stop();
     std::cout << "SUMMARY delivered=" << delivered << " duplicates="
@@ -185,5 +194,13 @@ int main(const int argc, char* argv[])
               << subscriber->sequence_tracker().gap_count() << " recovery_requests="
               << recovery_requests << " snapshot_recoveries=" << snapshot_recoveries
               << " recovery_failures=" << recovery_failures << '\n';
+    std::cout << "RELIABLE_SUBSCRIBER_RESULT delivered=" << delivered
+              << " duplicates=" << subscriber->sequence_tracker().duplicate_count()
+              << " gaps=" << subscriber->sequence_tracker().gap_count()
+              << " recovery_requests=" << recovery_requests
+              << " snapshot_recoveries=" << snapshot_recoveries
+              << " recovery_failures=" << recovery_failures
+              << " feed_mode=" << (config.dual_feed ? "dual" : "single")
+              << " recovery_server=" << config.recovery.host << ':' << config.recovery.port << '\n';
     return 0;
 }
