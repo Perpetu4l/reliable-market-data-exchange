@@ -245,15 +245,16 @@ Implemented:
 - `DualFeedSubscriber::resynchronise_after_snapshot()` moves expected sequence
   to checkpoint plus one and releases later buffered packets.
 
-Critical limitation:
+Live-path status and limitation:
 
-- `reliability_demo` creates snapshots with an empty `book_state`:
-  `create_snapshot(sequence, 1, {}, timestamp)`. It does not capture a live
-  `OrderBook`.
-- Snapshot resynchronisation changes only sequence tracking. It does not apply
-  a snapshot to any local order book.
-- The hash is 64-bit FNV-1a in `Snapshot.cpp`, not SHA-256. It is a deterministic
-  integrity-demo checksum, not production cryptography or tamper-proof storage.
+- The exchange rebuilds composite checkpoint state from published price-level
+  events and `reliable_subscriber` verifies/applies those levels on TCP
+  snapshot fallback.
+- The hash is SHA-256 over canonical fields and the previous checkpoint hash.
+  This makes checkpoints tamper-evident, not persistent, authenticated, or
+  tamper-proof storage.
+- `reliability_demo` still deliberately uses empty book snapshots because it
+  is a separate deterministic harness, not evidence of live state transfer.
 
 ### 3.12 Reliability: metrics and CSV — **implemented only for demo inputs**
 
@@ -418,17 +419,16 @@ Use this wording in the viva:
 
 | Claimed idea | What is novel compared with a plain single-feed example | Actual implementation status |
 |---|---|---|
-| **A/B feed redundancy** | The subscriber can accept the first arriving copy of the same sequence event and suppress the later copy. | Implemented in process through `DualFeedPublisher`, `FaultInjectingFeed`, `DualFeedSubscriber`, and `SequenceTracker`. Not connected to real two-UDP-feed sockets. |
+| **A/B feed redundancy** | The subscriber can accept the first arriving copy of the same sequence event and suppress the later copy. | The exchange can publish two UDP multicast feeds and `reliable_subscriber` joins both. End-to-end multicast still requires a normal host because this sandbox blocks binds. |
 | **Gap-safe ordered delivery** | A later event is held instead of immediately delivered while missing sequence numbers are recovered. | Implemented in `DualFeedSubscriber::pending_events_`, `on_recovered_event()`, and `drain_pending_events()`. Unit tested. |
-| **Bounded-history versus snapshot fallback** | The design explicitly models the choice: replay retained events if possible; otherwise use a checkpoint. | Range lookup and decision are implemented. Snapshot data is empty in the demo and does not rebuild an order book. |
+| **Bounded-history versus snapshot fallback** | The design explicitly models the choice: replay retained datagrams if possible; otherwise use a checkpoint. | Live subscriber replays retained datagrams over TCP, or requests and verifies/applies an in-memory composite checkpoint after `TOO_OLD`. |
 | **Deterministic fault experiments** | Fixed seed allows the same packet-loss and duplication decisions to be reproduced in a viva/test. | Implemented in `FaultInjector` with `std::mt19937_64`. Reordering/delay are configuration-only. |
-| **Recovery fairness seam** | FCFS and Round Robin are modelled as alternatives at a shared recovery service, instead of artificial network delays. | Queue class is implemented, but it is not integrated into recovery execution or GUI. |
-| **Tamper-evident checkpoint-chain model** | Snapshots include previous hash so retained checkpoints can be checked for modification/link mismatch. | FNV-1a chain and verification work. It is not SHA-256, persistent storage, or a tamper-proof database. |
+| **Recovery fairness seam** | FCFS and Round Robin are modelled as alternatives at a shared recovery service, instead of artificial network delays. | Live recovery TCP uses the scheduler. Policy and service counters are available through the exchange CLI; GUI does not yet graph them. |
+| **Tamper-evident checkpoint-chain model** | Snapshots include previous hash so retained checkpoints can be checked for modification/link mismatch. | SHA-256 chain verification works. It is not persistent storage or a tamper-proof database. |
 
 Do **not** claim these as completed features:
 
-- real networked dual-feed redundancy;
-- TCP-based recovery;
+- successful live-socket verification in this sandbox;
 - distributed order-book replication;
 - consensus;
 - production cryptography;
@@ -440,24 +440,25 @@ Do **not** claim these as completed features:
 
 ### 6.1 Missing connections
 
-1. The normal `exchange` creates `MarketDataPublisher` and one
-   `MulticastPublisherThread`; it never creates `DualFeedPublisher`.
-2. The normal UDP receiver creates `MulticastReceiver`; it never creates
-   `DualFeedSubscriber`, `SequenceTracker`, `RecoveryClient`, or
-   `RecoveryServer`.
-3. `RecoveryClient::recover()` is a local function call, not TCP.
+1. The normal `exchange` publishes to Feed A and optional Feed B through
+   `MulticastPublisherThread`; it does not use the demo-only `DualFeedPublisher`.
+2. The legacy `client` creates one `MulticastReceiver`; the separate
+   `reliable_subscriber` creates two receivers plus `DualFeedSubscriber`.
+3. `RecoveryClient::recover()` is a local demo helper; `RecoveryTcpClient` and
+   `RecoveryTcpServer` form the framed live recovery path.
 4. The GUI reliability widgets have no signals, callbacks, bindings, or timers
    that read `SystemMetrics`. This limitation does not apply to the separate
    Exchange Control tab, which reads actual C++ process output.
-5. `RecoveryScheduler` is not passed into `RecoveryServer`.
+5. `RecoveryServer` remains transport-neutral; its TCP listener owns and uses
+   the scheduler.
 
 ### 6.2 Incomplete functionality
 
 1. `FaultInjector::apply()` handles loss and duplication only. It does not
    reorder or delay packets.
-2. Snapshot `book_state` is not generated from `OrderBook`, persisted, sent, or
-   applied.
-3. Snapshot integrity uses FNV-1a rather than a cryptographic hash.
+2. Checkpoints are rebuilt from published price-level messages rather than
+   directly serialised from `OrderBook`; they are memory-only.
+3. Snapshot integrity uses SHA-256, but no authentication/signatures exist.
 4. `MetricsCollector` does not calculate throughput automatically.
 5. `RedundancyExperiment` only stores counters when manually called. The demo
    does not use this class.
@@ -510,9 +511,9 @@ only delivers 10 after 9 has been replayed.
 
 ### Q5. Is recovery really TCP now?
 
-No. The interface is designed like a recovery client/server protocol, but
-`RecoveryClient::recover()` currently calls the server object directly in the
-same process. Real TCP framing is planned work.
+For the live path, yes. `RecoveryTcpServer` runs in the exchange and
+`recovery_client`/`reliable_subscriber` use framed TCP requests. The older
+`RecoveryClient::recover()` is still the deterministic demo's local helper.
 
 ### Q6. What does bounded history do?
 
@@ -522,17 +523,18 @@ the demo tries snapshot fallback.
 
 ### Q7. Does snapshot fallback rebuild the order book?
 
-Not yet. The current demo uses empty snapshots and only advances sequence
-continuity after receiving a checkpoint. Real order-book serialisation and
-application are future work.
+The live subscriber applies verified absolute price levels to its local
+`BookBuilder` and advances continuity from the checkpoint. It is reconstructed
+from market-data events, not direct matching-engine serialisation.
 
 ### Q8. What exactly does the GUI show?
 
 The Market Visualisation tab shows a local simulated order book: best bid/ask
 over time, depth by price level, and recent simulated matched volume. It does
-not show live UDP exchange data. The reliability dashboard is currently visual
-structure only. The separate Exchange Control tab does launch real TCP
-processes, show their actual logs/results, and submit real manual orders.
+not show live UDP exchange data. The Reliability dashboard has a deterministic
+demo action and a separate live-local action which launches the real-process
+runner and displays only persisted live counters. The Exchange Control tab
+launches real TCP order-entry processes and submits real manual orders.
 
 ### Q9. How do you simulate loss reproducibly?
 
@@ -547,15 +549,14 @@ are at least partly independent.
 
 ### Q11. What is the role of FCFS versus Round Robin?
 
-`RecoveryScheduler` models how a shared recovery service could choose pending
-requests. FCFS serves arrival order; Round Robin rotates among subscribers.
-The class works alone but is not yet wired to the recovery server.
+`RecoveryScheduler` chooses pending retained-event requests. FCFS serves
+arrival order; Round Robin rotates among subscribers. The live recovery TCP
+listener uses its blocking wrapper and prints service counters at shutdown.
 
 ### Q12. Is your hash chain cryptographically secure?
 
-No. The implementation uses FNV-1a as a deterministic placeholder. It can
-demonstrate linked checkpoint verification, but a real implementation should
-use SHA-256 or another cryptographic hash plus durable storage.
+It uses SHA-256 and can detect checkpoint modification. It is not a complete
+security system because storage is in-memory and unauthenticated.
 
 ### Q13. What is the most convincing live demonstration today?
 
@@ -619,9 +620,10 @@ valid checkpoint-chain line.
 | `DualFeed.*` | Feed abstraction, faultable feed, dual publisher, subscriber buffering/replay. |
 | `FaultInjector.*` | Seeded loss/duplication decisions. |
 | `RecoveryHistory.*` | Bounded event retention and range lookup. |
-| `RecoveryProtocol.*` | In-process recovery request/response API. |
-| `Snapshot.*` | Checkpoints, bounded store, FNV-1a chain validation. |
-| `RecoveryScheduler.*` | FCFS / Round Robin queue class, used by the deterministic demo before each in-process recovery request. |
+| `RecoveryProtocol.*` | Transport-neutral recovery request/response API. |
+| `RecoveryTcp.*` | Framed TCP listener/client for live replay and snapshots. |
+| `Snapshot.*` | SHA-256 checkpoints and bounded in-memory store. |
+| `RecoveryScheduler.*` | FCFS / Round Robin queue used by demo and live TCP listener. |
 | `Metrics.*` | Metric aggregation and one-row CSV writer. |
 | `Experiments.*` | Configuration/metric holder classes, not a running experiment framework. |
 
