@@ -25,12 +25,18 @@ struct RecoveryResponse {
     std::string detail;
 };
 
+struct RecoveryStatusInfo {
+    uint64_t latest_sequence{0};
+    uint64_t history_minimum_sequence{0};
+};
+
 // Application-facing recovery service. TCP framing, authentication, and I/O are deferred.
 class RecoveryServer {
 public:
     RecoveryServer(std::shared_ptr<RecoveryHistory> history, std::shared_ptr<SnapshotManager> snapshots);
     [[nodiscard]] RecoveryResponse request_missing_data(const RecoveryRequest& request) const;
     [[nodiscard]] RecoveryResponse send_snapshot(uint64_t sequence) const;
+    [[nodiscard]] RecoveryStatusInfo status() const;
 private:
     std::shared_ptr<RecoveryHistory> history_;
     std::shared_ptr<SnapshotManager> snapshots_;

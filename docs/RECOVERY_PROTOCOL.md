@@ -101,6 +101,15 @@ connection/request/response counts, recovered-message count, per-subscriber
 service count, and queue-wait average/max. Snapshot requests currently bypass
 this fairness queue and are handled by the connection handler.
 
+## Status reconciliation
+
+`STATUS_REQUEST` has an empty payload. `STATUS_RESPONSE` is two big-endian
+`u64` values: `latest_sequence` and `history_minimum_sequence`. At the end of
+a timed subscriber run, `reliable_subscriber` requests this status and feeds
+`latest_sequence` through its heartbeat gap detector before shutdown. A status
+failure is reported as `failed_integrity`, rather than silently accepting a
+possibly lost stream tail.
+
 ## Controlled live loss experiments
 
 The exchange can withhold outbound **application messages** deterministically:

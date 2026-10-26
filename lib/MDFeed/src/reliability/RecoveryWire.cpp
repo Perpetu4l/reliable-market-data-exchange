@@ -237,4 +237,27 @@ std::optional<RecoveryResponse> RecoveryWireCodec::decode_snapshot_response(
     return result;
 }
 
+std::vector<uint8_t> RecoveryWireCodec::encode_status_response(const RecoveryStatusInfo status)
+{
+    std::vector<uint8_t> result;
+    result.reserve(16);
+    put_u64(result, status.latest_sequence);
+    put_u64(result, status.history_minimum_sequence);
+    return result;
+}
+
+std::optional<RecoveryStatusInfo> RecoveryWireCodec::decode_status_response(
+    const std::span<const uint8_t> payload, std::string& error)
+{
+    error.clear();
+    size_t at = 0;
+    RecoveryStatusInfo result;
+    if (!read_u64(payload, at, result.latest_sequence)
+        || !read_u64(payload, at, result.history_minimum_sequence) || at != payload.size()) {
+        error = "invalid status response";
+        return std::nullopt;
+    }
+    return result;
+}
+
 } // namespace mdfeed::reliability

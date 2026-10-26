@@ -194,6 +194,23 @@ void RecoveryTcpServer::client_loop(std::shared_ptr<Connection> connection)
                 else ++stats_.send_failures;
                 continue;
             }
+            if (frame->type == RecoveryWireType::STATUS_REQUEST) {
+                if (!frame->payload.empty()) {
+                    record_malformed();
+                    continue;
+                }
+                const auto response_frame = RecoveryWireCodec::frame(RecoveryWireType::STATUS_RESPONSE,
+                    RecoveryWireCodec::encode_status_response(recovery_service_->status()));
+                bool sent = false;
+                {
+                    std::lock_guard write_lock(connection->write_mutex);
+                    if (connection->open.load()) sent = send_all(connection->fd, response_frame);
+                }
+                std::lock_guard stats_lock(stats_mutex_);
+                if (sent) ++stats_.responses_sent;
+                else ++stats_.send_failures;
+                continue;
+            }
             if (frame->type != RecoveryWireType::RECOVERY_REQUEST) {
                 record_malformed();
                 continue;
@@ -387,6 +404,45 @@ std::optional<RecoveryResponse> RecoveryTcpClient::request_snapshot(
         const auto response = RecoveryWireCodec::decode_snapshot_response(frame->payload, error);
         close_socket(fd);
         return response;
+    }
+}
+
+std::optional<RecoveryStatusInfo> RecoveryTcpClient::request_status(std::string& error) const
+{
+    error.clear();
+    const auto fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) { error = "could not create recovery client socket"; return std::nullopt; }
+    timeval timeout{};
+    timeout.tv_sec = static_cast<time_t>(endpoint_.timeout_ms / 1000);
+    timeout.tv_usec = static_cast<suseconds_t>((endpoint_.timeout_ms % 1000) * 1000);
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(endpoint_.port);
+    if (inet_pton(AF_INET, endpoint_.host.c_str(), &address.sin_addr) != 1
+        || connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) < 0) {
+        error = "could not connect to recovery endpoint";
+        close_socket(fd);
+        return std::nullopt;
+    }
+    const auto bytes = RecoveryWireCodec::frame(RecoveryWireType::STATUS_REQUEST, {});
+    if (!send_all(fd, bytes)) { error = "could not send status request"; close_socket(fd); return std::nullopt; }
+    std::vector<uint8_t> stream;
+    uint8_t buffer[4096];
+    while (true) {
+        const auto received = recv(fd, buffer, sizeof(buffer), 0);
+        if (received <= 0) { error = "status response was not received"; close_socket(fd); return std::nullopt; }
+        stream.insert(stream.end(), buffer, buffer + received);
+        const auto frame = RecoveryWireCodec::take_frame(stream, error);
+        if (!error.empty()) { close_socket(fd); return std::nullopt; }
+        if (!frame) continue;
+        if (frame->type != RecoveryWireType::STATUS_RESPONSE) {
+            error = "unexpected status response frame"; close_socket(fd); return std::nullopt;
+        }
+        const auto result = RecoveryWireCodec::decode_status_response(frame->payload, error);
+        close_socket(fd);
+        return result;
     }
 }
 

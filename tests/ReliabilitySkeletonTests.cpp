@@ -121,6 +121,17 @@ TEST(RecoveryWireTests, RejectsOversizedFrame)
     EXPECT_EQ(error, "invalid recovery frame length");
 }
 
+TEST(RecoveryWireTests, RoundTripsStatusResponse)
+{
+    const RecoveryStatusInfo source{200, 101};
+    const auto payload = RecoveryWireCodec::encode_status_response(source);
+    std::string error;
+    const auto decoded = RecoveryWireCodec::decode_status_response(payload, error);
+    ASSERT_TRUE(decoded.has_value()) << error;
+    EXPECT_EQ(decoded->latest_sequence, 200U);
+    EXPECT_EQ(decoded->history_minimum_sequence, 101U);
+}
+
 TEST(RecoveryWireTests, RoundTripsVerifiableCompositeSnapshot)
 {
     SnapshotManager manager({1, 4, true});

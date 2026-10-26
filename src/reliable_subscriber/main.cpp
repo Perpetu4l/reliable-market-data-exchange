@@ -271,6 +271,20 @@ int main(const int argc, char* argv[])
     while (keep_running.load() && (!deadline || std::chrono::steady_clock::now() < *deadline)) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
+    // Final reconciliation closes the tail-loss hole even if the final UDP
+    // heartbeat was not observed before the duration elapsed.
+    if (!config.no_recovery) {
+        RecoveryTcpClient client(config.recovery);
+        std::string status_error;
+        const auto status = client.request_status(status_error);
+        if (status) {
+            subscriber->on_heartbeat(status->latest_sequence);
+            std::this_thread::sleep_for(std::chrono::milliseconds(config.gap_grace_ms + 10));
+        } else {
+            ++recovery_failures;
+            std::cerr << "STATUS RECONCILIATION FAILED: " << status_error << '\n';
+        }
+    }
     receiver_a.stop();
     if (receiver_b) receiver_b->stop();
     recovery_worker_running.store(false);

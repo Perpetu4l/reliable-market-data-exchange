@@ -48,6 +48,9 @@ public:
     [[nodiscard]] static std::vector<uint8_t> encode_snapshot_response(const RecoveryResponse& response);
     [[nodiscard]] static std::optional<RecoveryResponse> decode_snapshot_response(
         std::span<const uint8_t> payload, std::string& error);
+    [[nodiscard]] static std::vector<uint8_t> encode_status_response(RecoveryStatusInfo status);
+    [[nodiscard]] static std::optional<RecoveryStatusInfo> decode_status_response(
+        std::span<const uint8_t> payload, std::string& error);
 };
 
 } // namespace mdfeed::reliability

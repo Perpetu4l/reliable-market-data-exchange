@@ -22,6 +22,12 @@ RecoveryResponse RecoveryServer::send_snapshot(const uint64_t sequence) const
     return {RecoveryStatus::OK, {}, snapshot, {}};
 }
 
+RecoveryStatusInfo RecoveryServer::status() const
+{
+    if (!history_) return {};
+    return {history_->latest_sequence().value_or(0), history_->minimum_sequence().value_or(0)};
+}
+
 RecoveryClient::RecoveryClient(std::string subscriber_id) : subscriber_id_(std::move(subscriber_id)) {}
 RecoveryRequest RecoveryClient::make_request(const MissingRange range) const { return {subscriber_id_, range}; }
 RecoveryResponse RecoveryClient::recover(RecoveryServer& server, const MissingRange range) const

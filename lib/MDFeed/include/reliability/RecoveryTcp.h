@@ -87,6 +87,7 @@ public:
         const RecoveryRequest& request, std::string& error) const;
     [[nodiscard]] std::optional<RecoveryResponse> request_snapshot(
         uint64_t minimum_sequence, std::string& error) const;
+    [[nodiscard]] std::optional<RecoveryStatusInfo> request_status(std::string& error) const;
 
 private:
     Endpoint endpoint_;
