@@ -11,6 +11,11 @@
 #include <memory>
 #include <string>
 #include <optional>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
+#include <thread>
+#include <algorithm>
 
 namespace {
 using namespace mdfeed;
@@ -31,6 +36,8 @@ struct Config {
     RecoveryTcpClient::Endpoint recovery;
     std::string subscriber_id{"reliable-subscriber"};
     uint64_t run_seconds{0};
+    uint64_t gap_grace_ms{2};
+    bool no_recovery{false};
 };
 
 void usage(const char* program)
@@ -45,7 +52,9 @@ void usage(const char* program)
               << "  --recovery-server <IPv4>  Exchange recovery server (default: 127.0.0.1)\n"
               << "  --recovery-port <port>    Recovery TCP port (default: 9090)\n"
               << "  --subscriber <id>         Recovery subscriber identity\n"
-              << "  --run-seconds <N>         Exit after N seconds (0 waits for Ctrl+C)\n";
+              << "  --run-seconds <N>         Exit after N seconds (0 waits for Ctrl+C)\n"
+              << "  --gap-grace-ms <N>        Wait for the other feed before recovery (default: 2)\n"
+              << "  --no-recovery             Observe gaps without TCP recovery (negative control)\n";
 }
 
 bool parse_args(int argc, char* argv[], Config& config)
@@ -54,6 +63,7 @@ bool parse_args(int argc, char* argv[], Config& config)
         const std::string argument = argv[index];
         if (argument == "--help" || argument == "-h") { usage(argv[0]); return false; }
         if (argument == "--dual-feed") { config.dual_feed = true; continue; }
+        if (argument == "--no-recovery") { config.no_recovery = true; continue; }
         if (index + 1 >= argc) return false;
         const std::string value = argv[++index];
         if (argument == "--feed-a-ip") config.feed_a.multicast_ip = value;
@@ -65,6 +75,7 @@ bool parse_args(int argc, char* argv[], Config& config)
         else if (argument == "--recovery-port") config.recovery.port = static_cast<uint16_t>(std::stoul(value));
         else if (argument == "--subscriber") config.subscriber_id = value;
         else if (argument == "--run-seconds") config.run_seconds = std::stoull(value);
+        else if (argument == "--gap-grace-ms") config.gap_grace_ms = std::stoull(value);
         else return false;
     }
     // Dual reconciliation owns sequencing; disable each single-feed receiver's
@@ -102,11 +113,18 @@ int main(const int argc, char* argv[])
     std::atomic<uint64_t> recovered_events{0};
     std::atomic<uint64_t> recovery_failures{0};
     std::atomic<uint64_t> snapshot_recoveries{0};
+    std::mutex local_book_mutex;
+    std::mutex recovery_mutex;
+    std::condition_variable recovery_ready;
+    std::deque<MissingRange> recovery_queue;
+    uint64_t recovery_scheduled_through{0};
+    std::atomic<bool> recovery_worker_running{true};
     BookBuilder local_book;
     SnapshotHasher snapshot_hasher;
     std::unique_ptr<DualFeedSubscriber> subscriber;
     subscriber = std::make_unique<DualFeedSubscriber>(
         [&](const MarketDataEvent& event) {
+            std::lock_guard lock(local_book_mutex);
             (void)local_book.apply(event);
             ++delivered;
             std::cout << "DELIVERED seq=" << event.header.sequence_number
@@ -114,6 +132,28 @@ int main(const int argc, char* argv[])
                       << " type=" << event.header.message_type << '\n';
         },
         [&](const MissingRange range) {
+            if (config.no_recovery) return;
+            std::lock_guard lock(recovery_mutex);
+            const auto start = std::max(range.start_sequence, recovery_scheduled_through + 1);
+            if (start > range.end_sequence) return;
+            recovery_queue.push_back({start, range.end_sequence});
+            recovery_scheduled_through = range.end_sequence;
+            recovery_ready.notify_one();
+        });
+
+    std::thread recovery_worker([&] {
+        while (recovery_worker_running.load()) {
+            MissingRange range;
+            {
+                std::unique_lock lock(recovery_mutex);
+                recovery_ready.wait(lock, [&] { return !recovery_worker_running.load() || !recovery_queue.empty(); });
+                if (!recovery_worker_running.load() && recovery_queue.empty()) return;
+                range = recovery_queue.front();
+                recovery_queue.pop_front();
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(config.gap_grace_ms));
+            range.start_sequence = std::max(range.start_sequence, subscriber->expected_sequence());
+            if (!range.valid()) continue; // Feed B filled the range during grace.
             ++recovery_requests;
             RecoveryTcpClient client(config.recovery);
             std::string error;
@@ -123,35 +163,39 @@ int main(const int argc, char* argv[])
                           << range.end_sequence << " events=" << response->events.size() << '\n';
                 for (auto event : response->events) subscriber->on_recovered_event(std::move(event));
                 recovered_events += response->events.size();
-                return;
+                continue;
             }
             if (response && response->status == RecoveryStatus::TOO_OLD) {
                 const auto snapshot_response = client.request_snapshot(range.end_sequence, error);
                 if (snapshot_response && snapshot_response->status == RecoveryStatus::OK
                     && snapshot_response->snapshot && snapshot_hasher.verify(*snapshot_response->snapshot)) {
-                    local_book.apply_snapshot(*snapshot_response->snapshot);
+                    {
+                        std::lock_guard lock(local_book_mutex);
+                        local_book.apply_snapshot(*snapshot_response->snapshot);
+                    }
                     subscriber->resynchronise_after_snapshot(
                         snapshot_response->snapshot->sequence_number);
                     ++snapshot_recoveries;
                     std::cout << "SNAPSHOT RECOVERY OK checkpoint="
                               << snapshot_response->snapshot->sequence_number << " hash="
                               << snapshot_response->snapshot->hash << '\n';
-                    return;
+                    continue;
                 }
                 ++recovery_failures;
                 std::cerr << "SNAPSHOT RECOVERY FAILED range=" << range.start_sequence << '-'
                           << range.end_sequence << ": "
                           << (!snapshot_response ? error : snapshot_response->detail) << '\n';
-                return;
+                continue;
             }
             {
                 ++recovery_failures;
                 std::cerr << "RECOVERY FAILED range=" << range.start_sequence << '-'
                           << range.end_sequence << ": "
                           << (!response ? error : response->detail) << '\n';
-                return;
+                continue;
             }
-        });
+        }
+    });
 
     MulticastReceiver receiver_a(config.feed_a);
     receiver_a.set_message_handler([&](const MessageHeader& header, const void* data, const size_t length) {
@@ -191,6 +235,9 @@ int main(const int argc, char* argv[])
     }
     receiver_a.stop();
     if (receiver_b) receiver_b->stop();
+    recovery_worker_running.store(false);
+    recovery_ready.notify_all();
+    recovery_worker.join();
     std::cout << "SUMMARY delivered=" << delivered << " duplicates="
               << subscriber->sequence_tracker().duplicate_count() << " gaps="
               << subscriber->sequence_tracker().gap_count() << " recovery_requests="
@@ -203,6 +250,7 @@ int main(const int argc, char* argv[])
               << " recovered_events=" << recovered_events
               << " snapshot_recoveries=" << snapshot_recoveries
               << " recovery_failures=" << recovery_failures
+              << " gap_grace_ms=" << config.gap_grace_ms
               << " feed_mode=" << (config.dual_feed ? "dual" : "single")
               << " recovery_server=" << config.recovery.host << ':' << config.recovery.port << '\n';
     return 0;

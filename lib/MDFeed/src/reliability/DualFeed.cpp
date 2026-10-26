@@ -42,6 +42,12 @@ void DualFeedPublisher::publish(const MarketDataEvent& event) const
 DualFeedSubscriber::DualFeedSubscriber(EventHandler event_handler, GapHandler gap_handler)
     : event_handler_(std::move(event_handler)), gap_handler_(std::move(gap_handler)) {}
 
+uint64_t DualFeedSubscriber::expected_sequence() const
+{
+    std::lock_guard lock(mutex_);
+    return sequence_tracker_.expected_sequence();
+}
+
 void DualFeedSubscriber::on_packet(const FeedId feed_id, MarketDataEvent packet)
 {
     std::lock_guard lock(mutex_);

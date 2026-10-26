@@ -376,6 +376,12 @@ fault stage when testing loss. This sandbox blocks socket binding, so this
 live path was compiled and its startup-error handling was checked here, but it
 must be run on a normal macOS/Linux host for multicast/TCP end-to-end proof.
 
+`reliable_subscriber` waits `--gap-grace-ms 2` by default before requesting a
+gap. This lets Feed B supply the missing copy before recovery begins. It keeps
+monotonically scheduled ranges so repeated later packets do not re-request the
+same missing sequence. Use `--no-recovery` only as a negative control; it
+deliberately leaves detected gaps unresolved.
+
 ### One-command local live experiment
 
 The headless runner starts the real exchange and `reliable_subscriber` as
