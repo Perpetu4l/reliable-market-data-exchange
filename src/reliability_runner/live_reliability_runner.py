@@ -42,6 +42,7 @@ class RunConfig:
     snapshot_retention: int
     recovery_port: int
     multicast_interface: str
+    loss_injection: str
 
 
 def reader(process: subprocess.Popen[str], target: list[str], ready: threading.Event) -> None:
@@ -93,6 +94,8 @@ def main() -> int:
     parser.add_argument("--feed-a-loss", type=float, default=0.0)
     parser.add_argument("--feed-b-loss", type=float, default=0.0)
     parser.add_argument("--correlated-loss", type=float, default=0.0)
+    parser.add_argument("--loss-placement", choices=("subscriber", "publisher"), default="subscriber",
+                        help="Where app-level loss is injected; subscriber is the recommended live experiment path")
     parser.add_argument("--fault-seed", type=int, default=42)
     parser.add_argument("--recovery-policy", choices=("fcfs", "round-robin"), default="fcfs")
     parser.add_argument("--history", type=int, default=65536)
@@ -118,18 +121,26 @@ def main() -> int:
     config = RunConfig(args.duration, args.dual_feed, args.feed_a_loss, args.feed_b_loss,
                        args.correlated_loss, args.fault_seed, args.recovery_policy, args.history,
                        args.snapshot_interval, args.snapshot_retention, args.recovery_port,
-                       args.interface)
+                       args.interface, args.loss_placement)
     exchange_command = [str(exchange), "--mode", "simulation", "--md-interface", args.interface,
                         "--history", str(args.history), "--snapshot-interval", str(args.snapshot_interval),
                         "--snapshot-retention", str(args.snapshot_retention), "--recovery-port",
                         str(args.recovery_port), "--recovery-policy", args.recovery_policy,
-                        "--feed-a-loss", str(args.feed_a_loss), "--feed-b-loss", str(args.feed_b_loss),
-                        "--correlated-loss", str(args.correlated_loss), "--fault-seed", str(args.fault_seed)]
+                        "--fault-seed", str(args.fault_seed)]
     subscriber_command = [str(subscriber), "--interface", args.interface, "--recovery-server", "127.0.0.1",
                           "--recovery-port", str(args.recovery_port), "--run-seconds", str(args.duration)]
     if args.dual_feed:
         exchange_command.append("--dual-feed")
         subscriber_command.append("--dual-feed")
+    if args.loss_placement == "publisher":
+        exchange_command.extend(["--feed-a-loss", str(args.feed_a_loss), "--feed-b-loss", str(args.feed_b_loss),
+                                 "--correlated-loss", str(args.correlated_loss)])
+    elif args.correlated_loss:
+        subscriber_command.extend(["--loss-model", "correlated", "--corr-loss", str(args.correlated_loss),
+                                   "--drop-seed", str(args.fault_seed)])
+    elif args.feed_a_loss or args.feed_b_loss:
+        subscriber_command.extend(["--loss-model", "independent", "--drop-a", str(args.feed_a_loss),
+                                   "--drop-b", str(args.feed_b_loss), "--drop-seed", str(args.fault_seed)])
 
     exchange_lines: list[str] = []
     subscriber_lines: list[str] = []
@@ -180,7 +191,7 @@ def main() -> int:
         "exchange_metrics": exchange_metrics,
         "exchange_log_tail": exchange_lines,
         "subscriber_log_tail": subscriber_lines,
-        "measurement_boundary": "Live local processes with application-layer loss injection; not physical-network packet loss.",
+        "measurement_boundary": f"Live local processes with {args.loss_placement}-side application-layer loss injection; not physical-network packet loss.",
     }
     result_path.write_text(json.dumps(outcome, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"success": success, "result_path": str(result_path),

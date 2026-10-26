@@ -3,6 +3,7 @@
 #include "reliability/RecoveryTcp.h"
 #include "reliability/BookBuilder.h"
 #include "reliability/Snapshot.h"
+#include "reliability/FaultInjector.h"
 
 #include <atomic>
 #include <csignal>
@@ -38,6 +39,11 @@ struct Config {
     uint64_t run_seconds{0};
     uint64_t gap_grace_ms{2};
     bool no_recovery{false};
+    std::string loss_model{"none"};
+    double drop_a{0.0};
+    double drop_b{0.0};
+    double correlated_loss{0.0};
+    uint64_t drop_seed{42};
 };
 
 void usage(const char* program)
@@ -54,7 +60,12 @@ void usage(const char* program)
               << "  --subscriber <id>         Recovery subscriber identity\n"
               << "  --run-seconds <N>         Exit after N seconds (0 waits for Ctrl+C)\n"
               << "  --gap-grace-ms <N>        Wait for the other feed before recovery (default: 2)\n"
-              << "  --no-recovery             Observe gaps without TCP recovery (negative control)\n";
+              << "  --no-recovery             Observe gaps without TCP recovery (negative control)\n"
+              << "  --loss-model <name>       none|independent|correlated (default: none)\n"
+              << "  --drop-a <rate>           Receive-side Feed A application loss [0,1]\n"
+              << "  --drop-b <rate>           Receive-side Feed B application loss [0,1]\n"
+              << "  --corr-loss <rate>        Receive-side correlated application loss [0,1]\n"
+              << "  --drop-seed <N>           Deterministic receive-side fault seed (default: 42)\n";
 }
 
 bool parse_args(int argc, char* argv[], Config& config)
@@ -76,6 +87,11 @@ bool parse_args(int argc, char* argv[], Config& config)
         else if (argument == "--subscriber") config.subscriber_id = value;
         else if (argument == "--run-seconds") config.run_seconds = std::stoull(value);
         else if (argument == "--gap-grace-ms") config.gap_grace_ms = std::stoull(value);
+        else if (argument == "--loss-model") config.loss_model = value;
+        else if (argument == "--drop-a") config.drop_a = std::stod(value);
+        else if (argument == "--drop-b") config.drop_b = std::stod(value);
+        else if (argument == "--corr-loss") config.correlated_loss = std::stod(value);
+        else if (argument == "--drop-seed") config.drop_seed = std::stoull(value);
         else return false;
     }
     // Dual reconciliation owns sequencing; disable each single-feed receiver's
@@ -84,7 +100,10 @@ bool parse_args(int argc, char* argv[], Config& config)
     config.feed_b.enable_logging = false;
     config.feed_a.validate_sequence_numbers = false;
     config.feed_b.validate_sequence_numbers = false;
-    return true;
+    return (config.loss_model == "none" || config.loss_model == "independent" || config.loss_model == "correlated")
+        && config.drop_a >= 0.0 && config.drop_a <= 1.0
+        && config.drop_b >= 0.0 && config.drop_b <= 1.0
+        && config.correlated_loss >= 0.0 && config.correlated_loss <= 1.0;
 }
 
 MarketDataEvent copy_event(const MessageHeader& header, const void* data, const size_t length)
@@ -113,6 +132,10 @@ int main(const int argc, char* argv[])
     std::atomic<uint64_t> recovered_events{0};
     std::atomic<uint64_t> recovery_failures{0};
     std::atomic<uint64_t> snapshot_recoveries{0};
+    std::atomic<uint64_t> datagrams_received_a{0};
+    std::atomic<uint64_t> datagrams_received_b{0};
+    std::atomic<uint64_t> dropped_by_injector_a{0};
+    std::atomic<uint64_t> dropped_by_injector_b{0};
     std::mutex local_book_mutex;
     std::mutex recovery_mutex;
     std::condition_variable recovery_ready;
@@ -121,6 +144,9 @@ int main(const int argc, char* argv[])
     std::atomic<bool> recovery_worker_running{true};
     BookBuilder local_book;
     SnapshotHasher snapshot_hasher;
+    FaultInjector receive_fault_a({config.drop_a, 0.0, 0.0, {}, config.drop_seed});
+    FaultInjector receive_fault_b({config.drop_b, 0.0, 0.0, {}, config.drop_seed + 1});
+    FaultInjector receive_fault_correlated({config.correlated_loss, 0.0, 0.0, {}, config.drop_seed});
     std::unique_ptr<DualFeedSubscriber> subscriber;
     subscriber = std::make_unique<DualFeedSubscriber>(
         [&](const MarketDataEvent& event) {
@@ -199,20 +225,32 @@ int main(const int argc, char* argv[])
 
     MulticastReceiver receiver_a(config.feed_a);
     receiver_a.set_message_handler([&](const MessageHeader& header, const void* data, const size_t length) {
+        ++datagrams_received_a;
         if (static_cast<MessageType>(header.message_type) == MessageType::HEARTBEAT) {
             subscriber->on_heartbeat(header.sequence_number);
         } else {
-            subscriber->on_packet(FeedId::A, copy_event(header, data, length));
+            auto event = copy_event(header, data, length);
+            const bool drop = config.loss_model == "correlated"
+                ? receive_fault_correlated.drops(event)
+                : config.loss_model == "independent" && receive_fault_a.drops(event);
+            if (drop) { ++dropped_by_injector_a; return; }
+            subscriber->on_packet(FeedId::A, std::move(event));
         }
     });
     std::unique_ptr<MulticastReceiver> receiver_b;
     if (config.dual_feed) {
         receiver_b = std::make_unique<MulticastReceiver>(config.feed_b);
         receiver_b->set_message_handler([&](const MessageHeader& header, const void* data, const size_t length) {
+            ++datagrams_received_b;
             if (static_cast<MessageType>(header.message_type) == MessageType::HEARTBEAT) {
                 subscriber->on_heartbeat(header.sequence_number);
             } else {
-                subscriber->on_packet(FeedId::B, copy_event(header, data, length));
+                auto event = copy_event(header, data, length);
+                const bool drop = config.loss_model == "correlated"
+                    ? receive_fault_correlated.drops(event)
+                    : config.loss_model == "independent" && receive_fault_b.drops(event);
+                if (drop) { ++dropped_by_injector_b; return; }
+                subscriber->on_packet(FeedId::B, std::move(event));
             }
         });
     }
@@ -238,6 +276,9 @@ int main(const int argc, char* argv[])
     recovery_worker_running.store(false);
     recovery_ready.notify_all();
     recovery_worker.join();
+    const bool unresolved_gap = subscriber->pending_event_count() != 0
+        || (config.no_recovery && subscriber->sequence_tracker().gap_count() != 0)
+        || recovery_failures.load() != 0;
     std::cout << "SUMMARY delivered=" << delivered << " duplicates="
               << subscriber->sequence_tracker().duplicate_count() << " gaps="
               << subscriber->sequence_tracker().gap_count() << " recovery_requests="
@@ -251,7 +292,13 @@ int main(const int argc, char* argv[])
               << " snapshot_recoveries=" << snapshot_recoveries
               << " recovery_failures=" << recovery_failures
               << " gap_grace_ms=" << config.gap_grace_ms
+              << " datagrams_received_a=" << datagrams_received_a
+              << " datagrams_received_b=" << datagrams_received_b
+              << " dropped_by_injector_a=" << dropped_by_injector_a
+              << " dropped_by_injector_b=" << dropped_by_injector_b
+              << " loss_model=" << config.loss_model
+              << " run_status=" << (unresolved_gap ? "failed_integrity" : "completed")
               << " feed_mode=" << (config.dual_feed ? "dual" : "single")
               << " recovery_server=" << config.recovery.host << ':' << config.recovery.port << '\n';
-    return 0;
+    return unresolved_gap ? 2 : 0;
 }

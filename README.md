@@ -382,6 +382,21 @@ monotonically scheduled ranges so repeated later packets do not re-request the
 same missing sequence. Use `--no-recovery` only as a negative control; it
 deliberately leaves detected gaps unresolved.
 
+For per-subscriber experiments, inject deterministic receive-side loss instead
+of publisher-side withholding:
+
+```sh
+./build-local/src/reliable_subscriber --dual-feed \
+  --loss-model independent --drop-a 0.20 --drop-b 0.20 --drop-seed 7 \
+  --interface 127.0.0.1 --recovery-server 127.0.0.1 --recovery-port 9090
+```
+
+`--loss-model correlated --corr-loss P` makes the same sequence disappear from
+both feeds for that subscriber. These controls are still application-layer
+receive-side withholding, not physical-network loss. An unresolved gap,
+snapshot validation failure, or recovery failure makes the subscriber exit
+non-zero and records `run_status=failed_integrity`.
+
 ### One-command local live experiment
 
 The headless runner starts the real exchange and `reliable_subscriber` as
