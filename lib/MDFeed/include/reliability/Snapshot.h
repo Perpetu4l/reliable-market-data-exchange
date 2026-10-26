@@ -72,6 +72,7 @@ public:
     // Recovery needs a checkpoint that already includes the missing range, so
     // sequence tracking can safely advance beyond it.
     [[nodiscard]] std::optional<OrderBookSnapshot> get_snapshot_at_or_after(uint64_t sequence) const;
+    [[nodiscard]] size_t snapshot_count() const;
     [[nodiscard]] bool verify_snapshots() const;
 private:
     SnapshotConfig config_;

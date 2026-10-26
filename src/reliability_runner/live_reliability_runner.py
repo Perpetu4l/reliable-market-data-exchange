@@ -24,6 +24,7 @@ from pathlib import Path
 
 
 RESULT_RE = re.compile(r"RELIABLE_SUBSCRIBER_RESULT\s+(.*)$")
+EXCHANGE_RESULT_RE = re.compile(r"EXCHANGE_RESULT\s+(.*)$")
 READY_TEXT = "Recovery TCP server listening"
 
 
@@ -69,9 +70,9 @@ def stop(process: subprocess.Popen[str]) -> None:
             process.wait()
 
 
-def parse_result(lines: list[str]) -> dict[str, str] | None:
+def parse_fields(lines: list[str], pattern: re.Pattern[str]) -> dict[str, str] | None:
     for line in reversed(lines):
-        match = RESULT_RE.search(line)
+        match = pattern.search(line)
         if not match:
             continue
         fields: dict[str, str] = {}
@@ -144,7 +145,8 @@ def main() -> int:
     if not ready.wait(timeout=8):
         stop(exchange_process)
         outcome = {"success": False, "error": "exchange recovery listener did not become ready",
-                   "config": asdict(config), "exchange_log_tail": exchange_lines}
+                   "config": asdict(config), "exchange_metrics": parse_fields(exchange_lines, EXCHANGE_RESULT_RE),
+                   "exchange_log_tail": exchange_lines}
         result_path.write_text(json.dumps(outcome, indent=2) + "\n", encoding="utf-8")
         print(json.dumps({"success": False, "result_path": str(result_path),
                           "error": outcome["error"]}, indent=2))
@@ -163,7 +165,8 @@ def main() -> int:
     exchange_reader.join(timeout=1)
     subscriber_reader.join(timeout=1)
 
-    parsed = parse_result(subscriber_lines)
+    parsed = parse_fields(subscriber_lines, RESULT_RE)
+    exchange_metrics = parse_fields(exchange_lines, EXCHANGE_RESULT_RE)
     delivered = int(parsed.get("delivered", "0")) if parsed else 0
     success = subscriber_exit == 0 and parsed is not None and delivered > 0
     outcome = {
@@ -174,6 +177,7 @@ def main() -> int:
         "config": asdict(config),
         "subscriber_exit_code": subscriber_exit,
         "subscriber_metrics": parsed,
+        "exchange_metrics": exchange_metrics,
         "exchange_log_tail": exchange_lines,
         "subscriber_log_tail": subscriber_lines,
         "measurement_boundary": "Live local processes with application-layer loss injection; not physical-network packet loss.",

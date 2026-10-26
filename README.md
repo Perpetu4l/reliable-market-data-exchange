@@ -393,6 +393,9 @@ python3 src/reliability_runner/live_reliability_runner.py \
 The command returns success only when the exchange recovery listener became
 ready and the subscriber parsed a real result containing delivered events. It
 saves both successful and failed runs under `results/live-reliability-*.json`.
+Successful runs include structured exchange-side feed-drop, retained-snapshot,
+recovery-service, and scheduler queue counters, plus subscriber delivery and
+recovery counters; the GUI reads these saved values rather than inventing them.
 For a fair baseline comparison, repeat with the same duration, seed, history,
 snapshot settings, and policy but set both feed loss rates to `0`. The runner
 has been checked here through its real failure path; sandbox policy prevents it

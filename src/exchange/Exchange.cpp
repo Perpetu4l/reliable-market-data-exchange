@@ -478,6 +478,13 @@ void Exchange::print_supported_symbols() const
 void Exchange::print_final_stats() const
 {
     const auto stats = multicast_thread_->get_stats();
+    uint64_t recovery_connections = 0;
+    uint64_t recovery_requests = 0;
+    uint64_t recovery_responses = 0;
+    uint64_t recovery_messages = 0;
+    uint64_t recovery_average_wait = 0;
+    uint64_t recovery_max_wait = 0;
+    uint64_t recovery_subscribers = 0;
     std::cout << "\n=== FINAL EXCHANGE STATISTICS ===" << std::endl;
     std::cout << "Market Data Messages sent: " << stats.messages_sent << std::endl;
     std::cout << "Market Data Send failures: " << stats.send_failures << std::endl;
@@ -498,6 +505,13 @@ void Exchange::print_final_stats() const
         const auto scheduler = recovery_tcp_server_->scheduler_metrics();
         const auto average_wait = scheduler.recovery_request_count == 0 ? 0
             : scheduler.total_queue_wait_ns / scheduler.recovery_request_count;
+        recovery_connections = recovery.connections;
+        recovery_requests = recovery.requests_received;
+        recovery_responses = recovery.responses_sent;
+        recovery_messages = scheduler.messages_recovered;
+        recovery_average_wait = average_wait;
+        recovery_max_wait = scheduler.max_queue_wait_ns;
+        recovery_subscribers = scheduler.per_subscriber_service_distribution.size();
         std::cout << "Recovery TCP connections: " << recovery.connections << std::endl;
         std::cout << "Recovery TCP requests/responses: " << recovery.requests_received << '/'
                   << recovery.responses_sent << std::endl;
@@ -519,4 +533,19 @@ void Exchange::print_final_stats() const
                     GetOrdersMatched() << std::endl;
         }
     }
+    std::cout << "EXCHANGE_RESULT md_messages_sent=" << stats.messages_sent
+              << " feed_a_sent=" << stats.feed_a_sent
+              << " feed_b_sent=" << stats.feed_b_sent
+              << " feed_a_app_dropped=" << stats.feed_a_app_dropped
+              << " feed_b_app_dropped=" << stats.feed_b_app_dropped
+              << " md_send_failures=" << stats.send_failures
+              << " recovery_connections=" << recovery_connections
+              << " recovery_requests=" << recovery_requests
+              << " recovery_responses=" << recovery_responses
+              << " recovery_messages=" << recovery_messages
+              << " recovery_avg_queue_wait_ns=" << recovery_average_wait
+              << " recovery_max_queue_wait_ns=" << recovery_max_wait
+              << " recovery_subscribers=" << recovery_subscribers
+              << " snapshots_retained=" << snapshot_manager_->snapshot_count()
+              << '\n';
 }

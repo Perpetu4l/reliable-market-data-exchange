@@ -126,6 +126,11 @@ std::optional<OrderBookSnapshot> SnapshotManager::get_snapshot_at_or_after(const
     std::lock_guard lock(mutex_);
     return store_.at_or_after(sequence);
 }
+size_t SnapshotManager::snapshot_count() const
+{
+    std::lock_guard lock(mutex_);
+    return store_.all().size();
+}
 bool SnapshotManager::verify_snapshots() const
 {
     std::lock_guard lock(mutex_);

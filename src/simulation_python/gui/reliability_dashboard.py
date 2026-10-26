@@ -176,7 +176,9 @@ class ReliabilityDashboard(QTabWidget):
     def _apply_live_result(self, result: dict) -> None:
         """Present only counters saved by the real multi-process runner."""
         metrics = result.get("subscriber_metrics") or {}
+        exchange = result.get("exchange_metrics") or {}
         value = lambda key: metrics.get(key, "0")
+        exchange_value = lambda key: exchange.get(key, "Unavailable")
         success = bool(result.get("success"))
         self.metrics.throughput.setText("Unavailable for live run")
         self.metrics.duplicates.setText(value("duplicates"))
@@ -186,14 +188,19 @@ class ReliabilityDashboard(QTabWidget):
         self.recovery.request_label.setText(
             f"{value('recovery_requests')} request(s), {value('recovered_events')} replayed event(s)")
         self.recovery.latency_label.setText("Not collected by live subscriber")
-        self.redundancy.feed_a.setText("Recorded in exchange log")
-        self.redundancy.feed_b.setText("Recorded in exchange log")
+        self.redundancy.feed_a.setText(f"{exchange_value('feed_a_app_dropped')} application drop(s)")
+        self.redundancy.feed_b.setText(f"{exchange_value('feed_b_app_dropped')} application drop(s)")
         self.redundancy.avoided_gaps.setText("Not derived by live subscriber")
-        self.snapshot.status.setText(f"{value('snapshot_recoveries')} verified snapshot recovery/recoveries")
+        self.snapshot.status.setText(
+            f"{exchange_value('snapshots_retained')} retained; {value('snapshot_recoveries')} applied")
         self.integrity.latest_hash.setText("See subscriber/event log")
         self.integrity.chain_status.setText("Verified per applied checkpoint" if int(value("snapshot_recoveries")) else "No snapshot applied")
-        self.fairness.waiting_time.setText("See exchange shutdown service counters")
-        self.fairness.service_distribution.setText("See persisted exchange log tail")
+        self.fairness.waiting_time.setText(
+            f"avg/max {exchange_value('recovery_avg_queue_wait_ns')}/"
+            f"{exchange_value('recovery_max_queue_wait_ns')} ns")
+        self.fairness.service_distribution.setText(
+            f"{exchange_value('recovery_subscribers')} subscriber(s), "
+            f"{exchange_value('recovery_messages')} recovered event(s)")
         self.delivery_chart.clear()
         self._bars(self.delivery_chart, ["Delivered", "Duplicates", "Gaps", "Replayed"],
                    [float(value("delivered")), float(value("duplicates")), float(value("gaps")),
