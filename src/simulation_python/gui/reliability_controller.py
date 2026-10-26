@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import csv
+import json
 import os
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -20,12 +22,15 @@ class ReliabilityExperimentController(QObject):
     status_changed = pyqtSignal(str)
     result_ready = pyqtSignal(dict)
     result_saved = pyqtSignal(str)
+    live_result_ready = pyqtSignal(dict)
 
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
         self.process: QProcess | None = None
         self.csv_path: Path | None = None
         self.run_configuration: dict[str, str] = {}
+        self.live_run = False
+        self.live_output = bytearray()
 
     @staticmethod
     def _binary() -> str | None:
@@ -93,14 +98,72 @@ class ReliabilityExperimentController(QObject):
             self.log_line.emit(process.errorString())
             return False
         self.process = process
+        self.live_run = False
         self.status_changed.emit("Running")
         self.log_line.emit("Started deterministic reliability experiment.")
+        return True
+
+    @staticmethod
+    def _live_build_directory() -> Path | None:
+        configured = os.environ.get("EXCHANGE_BINARY_DIR")
+        roots = [Path(configured)] if configured else []
+        roots.extend([REPOSITORY_ROOT / "build-local", REPOSITORY_ROOT / "build", REPOSITORY_ROOT / "build-python"])
+        for root in roots:
+            if (root / "src" / "exchange").is_file() and (root / "src" / "reliable_subscriber").is_file():
+                return root
+        return None
+
+    def start_live(self, config: dict[str, str | int | float | bool]) -> bool:
+        if self.process and self.process.state() != QProcess.ProcessState.NotRunning:
+            self.log_line.emit("Reliability experiment already running.")
+            return False
+        build_dir = self._live_build_directory()
+        runner = REPOSITORY_ROOT / "src" / "reliability_runner" / "live_reliability_runner.py"
+        if not build_dir or not runner.is_file():
+            self.status_changed.emit("Build required")
+            self.log_line.emit("Live runner requires built exchange and reliable_subscriber targets.")
+            return False
+        interval = int(config["snapshot_interval"]) if config["snapshots_enabled"] else 0
+        mode = str(config["mode"])
+        arguments = [str(runner), "--build-dir", str(build_dir), "--duration", str(config["duration"]),
+                     "--history", str(config["history"]), "--snapshot-interval", str(interval),
+                     "--snapshot-retention", str(config["retention"]), "--fault-seed", str(config["seed"]),
+                     "--recovery-policy", str(config["scheduler"])]
+        loss = str(config["loss_rate"])
+        if mode == "independent":
+            arguments.extend(["--dual-feed", "--feed-a-loss", loss, "--feed-b-loss", loss])
+        elif mode == "correlated":
+            arguments.extend(["--dual-feed", "--correlated-loss", loss])
+        else:
+            arguments.extend(["--feed-a-loss", loss])
+        self.live_output = bytearray()
+        self.live_run = True
+        process = QProcess(self)
+        process.setWorkingDirectory(str(REPOSITORY_ROOT))
+        process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+        process.readyReadStandardOutput.connect(self._read_output)
+        process.errorOccurred.connect(lambda _error: self.status_changed.emit("Failed"))
+        process.finished.connect(self._finished)
+        process.start(sys.executable, arguments)
+        if not process.waitForStarted(3000):
+            self.status_changed.emit("Failed to start")
+            self.log_line.emit(process.errorString())
+            return False
+        self.process = process
+        self.status_changed.emit("Running live local experiment")
+        self.log_line.emit("Started live exchange/subscriber runner; result will be persisted as JSON.")
         return True
 
     def _read_output(self) -> None:
         if not self.process:
             return
-        for line in bytes(self.process.readAllStandardOutput()).decode(errors="replace").splitlines():
+        raw_output = bytes(self.process.readAllStandardOutput())
+        if self.live_run:
+            self.live_output.extend(raw_output)
+            for line in raw_output.decode(errors="replace").splitlines():
+                self.log_line.emit(line)
+            return
+        for line in raw_output.decode(errors="replace").splitlines():
             match = RESULT_PATTERN.match(line)
             if match:
                 result = {
@@ -114,6 +177,17 @@ class ReliabilityExperimentController(QObject):
     def _finished(self, code: int, _status: QProcess.ExitStatus) -> None:
         if self.process:
             self._read_output()
+        if self.live_run:
+            try:
+                result = json.loads(bytes(self.live_output).decode(errors="replace"))
+                self.live_result_ready.emit(result)
+                self.result_saved.emit(str(result.get("result_path", "")))
+            except json.JSONDecodeError as error:
+                self.log_line.emit(f"Could not parse live-run result: {error}")
+            self.status_changed.emit("Completed" if code == 0 else f"Failed ({code})")
+            self.process = None
+            self.live_run = False
+            return
         self.status_changed.emit("Completed" if code == 0 else f"Failed ({code})")
         if code == 0 and self.csv_path and self.csv_path.is_file():
             self._enrich_csv(self.csv_path)
@@ -141,4 +215,5 @@ class ReliabilityExperimentController(QObject):
             if not self.process.waitForFinished(1000):
                 self.process.kill()
         self.process = None
+        self.live_run = False
         self.status_changed.emit("Stopped")

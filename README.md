@@ -492,12 +492,23 @@ The GUI has three clear views:
   shows the actual structured output: loss, duplicate suppression, gaps,
   replay recovery, feed drops, checkpoint hash, and latency percentiles. Each
   run writes `results/reliability-*.csv`; its output is also kept in the
-  dashboard log.
+  dashboard log. **Run live local experiment** is separate: it starts the
+  actual exchange and `reliable_subscriber` through the provenance-preserving
+  runner, then displays only counters saved by that live run. Fields not
+  collected by the live path explicitly say unavailable rather than borrowing
+  deterministic-demo values.
 
 For a quick visible demo, open **Reliability Experiments → Configure & Run**,
 choose **Dual feed - independent loss**, set packet loss to `0.20`, leave the
 seed as `42`, then press **Run reliability experiment**. The dashboard changes
 to **Results** automatically when the run completes.
+
+For the real local path, use the same settings but press **Run live local
+experiment**, choose a duration, and run on a normal host that allows local
+TCP/multicast sockets. The saved `results/live-reliability-*.json` identifies
+whether the listener became ready, the exact configuration, observed subscriber
+counters, and bounded log tails. A failed live run is shown as failed; it is
+never rendered as an experiment result.
 
 ### GUI workflows and what they prove
 

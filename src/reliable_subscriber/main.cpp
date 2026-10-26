@@ -99,6 +99,7 @@ int main(const int argc, char* argv[])
 
     std::atomic<uint64_t> delivered{0};
     std::atomic<uint64_t> recovery_requests{0};
+    std::atomic<uint64_t> recovered_events{0};
     std::atomic<uint64_t> recovery_failures{0};
     std::atomic<uint64_t> snapshot_recoveries{0};
     BookBuilder local_book;
@@ -121,6 +122,7 @@ int main(const int argc, char* argv[])
                 std::cout << "RECOVERY OK range=" << range.start_sequence << '-'
                           << range.end_sequence << " events=" << response->events.size() << '\n';
                 for (auto event : response->events) subscriber->on_recovered_event(std::move(event));
+                recovered_events += response->events.size();
                 return;
             }
             if (response && response->status == RecoveryStatus::TOO_OLD) {
@@ -198,6 +200,7 @@ int main(const int argc, char* argv[])
               << " duplicates=" << subscriber->sequence_tracker().duplicate_count()
               << " gaps=" << subscriber->sequence_tracker().gap_count()
               << " recovery_requests=" << recovery_requests
+              << " recovered_events=" << recovered_events
               << " snapshot_recoveries=" << snapshot_recoveries
               << " recovery_failures=" << recovery_failures
               << " feed_mode=" << (config.dual_feed ? "dual" : "single")

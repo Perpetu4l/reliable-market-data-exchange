@@ -53,10 +53,12 @@ class ReliabilityDashboard(QTabWidget):
         self.addTab(self._scroll([self.integrity]), "Checkpoint Integrity")
 
         self.experiment.start_button.clicked.connect(self._start)
+        self.experiment.live_start_button.clicked.connect(self._start_live)
         self.experiment.stop_button.clicked.connect(self.controller.stop)
         self.controller.log_line.connect(self._append_log)
         self.controller.status_changed.connect(self.experiment.status.setText)
         self.controller.result_ready.connect(self._apply_result)
+        self.controller.live_result_ready.connect(self._apply_live_result)
         self.controller.result_saved.connect(lambda path: self._append_log(f"Saved results to {path}"))
         self.experiment.mode.currentIndexChanged.connect(self.redundancy.mode.setCurrentIndex)
         self.redundancy.mode.currentIndexChanged.connect(self.experiment.mode.setCurrentIndex)
@@ -99,6 +101,21 @@ class ReliabilityDashboard(QTabWidget):
         self.controller.start({
             "mode": self.experiment.mode.currentData(),
             "events": self.experiment.events.value(),
+            "loss_rate": self.experiment.loss_rate.value(),
+            "seed": self.experiment.seed.value(),
+            "history": self.experiment.history.value(),
+            "snapshots_enabled": self.snapshot.enabled.isChecked(),
+            "snapshot_interval": self.snapshot.interval.value(),
+            "retention": self.snapshot.retention.value(),
+            "scheduler": "round-robin" if self.fairness.policy.currentText() == "Round Robin" else "fcfs",
+        })
+
+    def _start_live(self) -> None:
+        self.log.clear()
+        self.summary.setText("Starting real local exchange and subscriber processes...")
+        self.controller.start_live({
+            "mode": self.experiment.mode.currentData(),
+            "duration": self.experiment.live_duration.value(),
             "loss_rate": self.experiment.loss_rate.value(),
             "seed": self.experiment.seed.value(),
             "history": self.experiment.history.value(),
@@ -154,6 +171,37 @@ class ReliabilityDashboard(QTabWidget):
             self.latency_chart,
             ["p50", "p95", "p99"], [p50_us, p95_us, p99_us], "#b35cba",
         )
+        self.setCurrentIndex(0)
+
+    def _apply_live_result(self, result: dict) -> None:
+        """Present only counters saved by the real multi-process runner."""
+        metrics = result.get("subscriber_metrics") or {}
+        value = lambda key: metrics.get(key, "0")
+        success = bool(result.get("success"))
+        self.metrics.throughput.setText("Unavailable for live run")
+        self.metrics.duplicates.setText(value("duplicates"))
+        self.metrics.gaps.setText(value("gaps"))
+        self.metrics.recovery_percentiles.setText("Unavailable for live run")
+        self.recovery.gap_label.setText("No gap detected" if value("gaps") == "0" else f"{value('gaps')} detected gap(s)")
+        self.recovery.request_label.setText(
+            f"{value('recovery_requests')} request(s), {value('recovered_events')} replayed event(s)")
+        self.recovery.latency_label.setText("Not collected by live subscriber")
+        self.redundancy.feed_a.setText("Recorded in exchange log")
+        self.redundancy.feed_b.setText("Recorded in exchange log")
+        self.redundancy.avoided_gaps.setText("Not derived by live subscriber")
+        self.snapshot.status.setText(f"{value('snapshot_recoveries')} verified snapshot recovery/recoveries")
+        self.integrity.latest_hash.setText("See subscriber/event log")
+        self.integrity.chain_status.setText("Verified per applied checkpoint" if int(value("snapshot_recoveries")) else "No snapshot applied")
+        self.fairness.waiting_time.setText("See exchange shutdown service counters")
+        self.fairness.service_distribution.setText("See persisted exchange log tail")
+        self.delivery_chart.clear()
+        self._bars(self.delivery_chart, ["Delivered", "Duplicates", "Gaps", "Replayed"],
+                   [float(value("delivered")), float(value("duplicates")), float(value("gaps")),
+                    float(value("recovered_events"))], "#2677c9")
+        self.latency_chart.clear()
+        self.summary.setText(
+            "Live run completed." if success else
+            "Live run failed before recording delivered events; inspect the persisted result and log below.")
         self.setCurrentIndex(0)
 
     def _append_log(self, line: str) -> None:
