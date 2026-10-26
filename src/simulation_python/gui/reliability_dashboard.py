@@ -175,7 +175,17 @@ class ReliabilityDashboard(QTabWidget):
 
     def _apply_live_result(self, result: dict) -> None:
         """Present only counters saved by the real multi-process runner."""
-        metrics = result.get("subscriber_metrics") or {}
+        raw_metrics = result.get("subscriber_metrics") or {}
+        if raw_metrics and all(isinstance(value, dict) for value in raw_metrics.values()):
+            # A live multi-subscriber run persists one observed record per
+            # process. Aggregate count fields only; it does not fabricate
+            # latency or a synthetic per-subscriber state.
+            fields = ("delivered", "duplicates", "gaps", "recovery_requests", "recovered_events",
+                      "snapshot_recoveries", "recovery_failures")
+            metrics = {field: str(sum(int(record.get(field, "0")) for record in raw_metrics.values()))
+                       for field in fields}
+        else:
+            metrics = raw_metrics
         exchange = result.get("exchange_metrics") or {}
         value = lambda key: metrics.get(key, "0")
         exchange_value = lambda key: exchange.get(key, "Unavailable")

@@ -406,7 +406,7 @@ and bounded process-log tails. Build first, then run:
 
 ```sh
 python3 src/reliability_runner/live_reliability_runner.py \
-  --build-dir build-local --duration 15 --dual-feed \
+  --build-dir build-local --duration 15 --dual-feed --subscribers 4 \
   --feed-a-loss 0.20 --feed-b-loss 0.20 --fault-seed 7 \
   --snapshot-interval 10 --history 5 --recovery-policy round-robin
 ```
@@ -422,6 +422,12 @@ snapshot settings, and policy but set both feed loss rates to `0`. The runner
 has been checked here through its real failure path; sandbox policy prevents it
 from opening the TCP listener, so successful socket execution still needs a
 normal host.
+
+`--subscribers N` starts N separate `reliable_subscriber` processes against
+the same exchange (1--16). Each receive-side fault stream uses a distinct seed
+derived from `--fault-seed`; Feed A/B correlation remains within a subscriber.
+The saved JSON preserves each subscriber's own result and log tail, so failed
+subscribers cannot disappear inside an aggregate result.
 
 ### Automatic local TCP workload
 

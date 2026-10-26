@@ -43,6 +43,7 @@ class RunConfig:
     recovery_port: int
     multicast_interface: str
     loss_injection: str
+    subscriber_count: int
 
 
 def reader(process: subprocess.Popen[str], target: list[str], ready: threading.Event) -> None:
@@ -102,10 +103,11 @@ def main() -> int:
     parser.add_argument("--snapshot-interval", type=int, default=0)
     parser.add_argument("--snapshot-retention", type=int, default=8)
     parser.add_argument("--recovery-port", type=int, default=9090)
+    parser.add_argument("--subscribers", type=int, default=1, help="Independent market-data subscriber processes")
     parser.add_argument("--results-dir", default="results")
     args = parser.parse_args()
 
-    if args.duration <= 0 or args.history < 0 or args.snapshot_interval < 0 or args.snapshot_retention < 0:
+    if args.duration <= 0 or args.subscribers < 1 or args.subscribers > 16 or args.history < 0 or args.snapshot_interval < 0 or args.snapshot_retention < 0:
         parser.error("duration and retention values must be non-negative; duration must be positive")
     if any(not 0.0 <= value <= 1.0 for value in
            (args.feed_a_loss, args.feed_b_loss, args.correlated_loss)):
@@ -121,7 +123,7 @@ def main() -> int:
     config = RunConfig(args.duration, args.dual_feed, args.feed_a_loss, args.feed_b_loss,
                        args.correlated_loss, args.fault_seed, args.recovery_policy, args.history,
                        args.snapshot_interval, args.snapshot_retention, args.recovery_port,
-                       args.interface, args.loss_placement)
+                       args.interface, args.loss_placement, args.subscribers)
     exchange_command = [str(exchange), "--mode", "simulation", "--md-interface", args.interface,
                         "--history", str(args.history), "--snapshot-interval", str(args.snapshot_interval),
                         "--snapshot-retention", str(args.snapshot_retention), "--recovery-port",
@@ -163,39 +165,59 @@ def main() -> int:
                           "error": outcome["error"]}, indent=2))
         return 1
 
-    subscriber_process = subprocess.Popen(subscriber_command, cwd=root, text=True,
-                                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    subscriber_reader = threading.Thread(target=reader, args=(subscriber_process, subscriber_lines, threading.Event()), daemon=True)
-    subscriber_reader.start()
-    try:
-        subscriber_exit = subscriber_process.wait(timeout=args.duration + 8)
-    except subprocess.TimeoutExpired:
-        stop(subscriber_process)
-        subscriber_exit = subscriber_process.returncode
+    subscriber_processes: list[subprocess.Popen[str]] = []
+    subscriber_lines_by_id: dict[str, list[str]] = {}
+    subscriber_readers: list[threading.Thread] = []
+    for index in range(args.subscribers):
+        subscriber_id = f"subscriber-{index + 1}"
+        command = [*subscriber_command, "--subscriber", subscriber_id]
+        # Independent receive-side streams must use distinct seeds; correlated
+        # remains correlated between feeds within each subscriber.
+        if args.loss_placement == "subscriber":
+            command.extend(["--drop-seed", str(args.fault_seed + index)])
+        process = subprocess.Popen(command, cwd=root, text=True,
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        lines: list[str] = []
+        subscriber_lines_by_id[subscriber_id] = lines
+        subscriber_processes.append(process)
+        thread = threading.Thread(target=reader, args=(process, lines, threading.Event()), daemon=True)
+        thread.start()
+        subscriber_readers.append(thread)
+    subscriber_exits: dict[str, int | None] = {}
+    for index, process in enumerate(subscriber_processes):
+        subscriber_id = f"subscriber-{index + 1}"
+        try:
+            subscriber_exits[subscriber_id] = process.wait(timeout=args.duration + 8)
+        except subprocess.TimeoutExpired:
+            stop(process)
+            subscriber_exits[subscriber_id] = process.returncode
     stop(exchange_process)
     exchange_reader.join(timeout=1)
-    subscriber_reader.join(timeout=1)
+    for thread in subscriber_readers:
+        thread.join(timeout=1)
 
-    parsed = parse_fields(subscriber_lines, RESULT_RE)
+    parsed_by_id = {subscriber_id: parse_fields(lines, RESULT_RE)
+                    for subscriber_id, lines in subscriber_lines_by_id.items()}
     exchange_metrics = parse_fields(exchange_lines, EXCHANGE_RESULT_RE)
-    delivered = int(parsed.get("delivered", "0")) if parsed else 0
-    success = subscriber_exit == 0 and parsed is not None and delivered > 0
+    success = all(subscriber_exits[subscriber_id] == 0 and metrics is not None
+                  and int(metrics.get("delivered", "0")) > 0
+                  for subscriber_id, metrics in parsed_by_id.items())
     outcome = {
         "schema": "reliable-market-data-live-run/v1",
         "started_at_utc": started_at.isoformat(),
         "finished_at_utc": datetime.now(timezone.utc).isoformat(),
         "success": success,
         "config": asdict(config),
-        "subscriber_exit_code": subscriber_exit,
-        "subscriber_metrics": parsed,
+        "subscriber_exit_codes": subscriber_exits,
+        "subscriber_metrics": parsed_by_id,
         "exchange_metrics": exchange_metrics,
         "exchange_log_tail": exchange_lines,
-        "subscriber_log_tail": subscriber_lines,
+        "subscriber_log_tails": subscriber_lines_by_id,
         "measurement_boundary": f"Live local processes with {args.loss_placement}-side application-layer loss injection; not physical-network packet loss.",
     }
     result_path.write_text(json.dumps(outcome, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"success": success, "result_path": str(result_path),
-                      "subscriber_metrics": parsed}, indent=2))
+                      "subscriber_metrics": parsed_by_id}, indent=2))
     return 0 if success else 1
 
 
