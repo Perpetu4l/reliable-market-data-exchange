@@ -285,10 +285,12 @@ Limitations:
 works when called directly. `src/reliability_demo/main.cpp` now enqueues each
 detected-gap request and asks the scheduler for the next request before making
 the in-process recovery call. The GUI chooses FCFS or Round Robin for this
-demo. It is not wired into a networked recovery server.
+demo. The live exchange TCP listener also uses the scheduler; its CLI policy
+and shutdown counters are separate from demo metrics.
 
-`RecoverySchedulerMetrics` does not calculate waiting time or recovery latency.
-It counts request count, recovered message count, and services per subscriber.
+Live `RecoverySchedulerMetrics` records request count, recovered message count,
+per-subscriber service distribution, and queue-wait total/max. It does not
+measure end-to-end subscriber recovery latency.
 
 ## 4. GUI explanation
 
