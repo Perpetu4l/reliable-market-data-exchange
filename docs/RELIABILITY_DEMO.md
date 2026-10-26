@@ -26,6 +26,8 @@ suppression, gap detection, bounded-history recovery, ordered replay, snapshot
 checkpoint verification, and summary metrics. Reuse the same seed to reproduce
 the same fault decisions.
 
-The executable is intentionally a local demo. A future phase must connect the
-same interfaces to UDP Feed A/Feed B endpoints, a framed TCP recovery service,
-live order-book snapshots, and pybind11 GUI telemetry.
+The executable is intentionally a local demo. The repository also contains a
+separate live path: `exchange --dual-feed`, `reliable_subscriber`, framed TCP
+recovery, composite in-memory snapshots, and a GUI/CLI runner that persists
+live JSON results. That path requires a normal host for socket verification;
+the demo must not be presented as live-network evidence.

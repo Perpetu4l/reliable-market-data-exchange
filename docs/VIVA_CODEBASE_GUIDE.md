@@ -9,19 +9,20 @@ README claims. Paths below are relative to the repository root.
 This project contains three related parts:
 
 1. A **centralised electronic exchange**: a C++ limit order book, matching
-   engine, TCP order entry, and one UDP multicast market-data publisher.
+   engine, TCP order entry, plus configurable UDP multicast Feed A/Feed B.
 2. A **local reliability demonstration**: an in-process simulation of two feeds,
    packet loss/duplication, sequence tracking, duplicate suppression, bounded
    replay recovery, snapshot checkpoint fallback, and CSV metrics.
-3. A **real TCP workload path**: the exchange and each `workload_client` run
-   in separate processes, use TCP sockets, complete an identity handshake, and
-   report client-measured acknowledgement RTTs.
+3. A **real-process path**: order workloads use TCP sockets, while
+   `reliable_subscriber` joins UDP feeds and requests retained replay/snapshots
+   over a separate TCP recovery endpoint.
 
 The important honest sentence is:
 
-> The reliability logic works in `reliability_demo` as an in-process,
-> deterministic demonstration. It is not yet connected to two real UDP feeds,
-> a real TCP recovery socket, the live exchange publisher, or the GUI.
+> The deterministic demo remains in-process, but the repository also contains
+> a separate live exchange/subscriber/recovery path. It compiles here, while
+> actual socket execution must be verified on a normal host because this
+> sandbox denies listener binding.
 
 The exchange has one authoritative order book per symbol. It does **not** have
 distributed consensus, replica order books, or distributed state replication.
@@ -218,18 +219,20 @@ The test `DualFeedSubscriberTests.ReplaysGapBeforeBufferedLaterEvent` in
 `tests/ReliabilitySkeletonTests.cpp` proves the small case `1, 3` plus replay
 of `2` delivers `1, 2, 3` in order.
 
-### 3.10 Reliability: bounded replay recovery — **implemented in-process**
+### 3.10 Reliability: bounded replay recovery — **demo and live paths**
 
 - `RecoveryHistory` stores a bounded `std::deque` of events and evicts oldest
   events when full. File: `lib/MDFeed/src/reliability/RecoveryHistory.cpp`.
 - `RecoveryServer::request_missing_data()` returns `OK`, `TOO_OLD`,
   `BAD_REQUEST`, or `ERROR`. File:
   `lib/MDFeed/src/reliability/RecoveryProtocol.cpp`.
-- `RecoveryClient::recover()` directly calls the server object in memory.
-  It has an explicit TODO to replace that call with TCP transport.
+- `RecoveryClient::recover()` directly calls the server object in memory for
+  the deterministic demo.
+- `RecoveryTcpServer`/`RecoveryTcpClient` provide the separate framed TCP
+  live path used by `exchange`, `recovery_client`, and `reliable_subscriber`.
 
-So bounded-range decision logic is real; the TCP recovery network protocol is
-not implemented.
+The live path returns retained original datagrams or `TOO_OLD`; its normal-host
+socket run remains unverified in this sandbox.
 
 ### 3.11 Reliability: snapshots and hash-chain checks — **partially implemented**
 
