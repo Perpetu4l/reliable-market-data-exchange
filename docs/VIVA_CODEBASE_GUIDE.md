@@ -51,8 +51,9 @@ OrderEntryServer -> bounded multi-producer order queue -> Exchange::client_order
                                     MulticastPublisherThread -> UDP multicast
 ```
 
-The normal exchange publisher is one multicast endpoint. It does not instantiate
-`DualFeedPublisher`.
+The normal exchange publisher uses `MulticastPublisherThread`. With
+`--dual-feed` it sends the same existing binary datagram stream to Feed A and
+Feed B endpoints; it does not instantiate the demo-only `DualFeedPublisher`.
 
 ### 2.2 Implemented reliability-demo path
 
@@ -292,8 +293,9 @@ demo. The live exchange TCP listener also uses the scheduler; its CLI policy
 and shutdown counters are separate from demo metrics.
 
 Live `RecoverySchedulerMetrics` records request count, recovered message count,
-per-subscriber service distribution, and queue-wait total/max. It does not
-measure end-to-end subscriber recovery latency.
+per-subscriber service distribution, and queue-wait total/max. The subscriber
+separately records successful TCP repair latency; these remain distinct
+measurements.
 
 ## 4. GUI explanation
 
@@ -428,7 +430,7 @@ Use this wording in the viva:
 | **Gap-safe ordered delivery** | A later event is held instead of immediately delivered while missing sequence numbers are recovered. | Implemented in `DualFeedSubscriber::pending_events_`, `on_recovered_event()`, and `drain_pending_events()`. Unit tested. |
 | **Bounded-history versus snapshot fallback** | The design explicitly models the choice: replay retained datagrams if possible; otherwise use a checkpoint. | Live subscriber replays retained datagrams over TCP, or requests and verifies/applies an in-memory composite checkpoint after `TOO_OLD`. |
 | **Deterministic fault experiments** | Fixed seed allows the same packet-loss and duplication decisions to be reproduced in a viva/test. | Implemented in `FaultInjector` with `std::mt19937_64`. Reordering/delay are configuration-only. |
-| **Recovery fairness seam** | FCFS and Round Robin are modelled as alternatives at a shared recovery service, instead of artificial network delays. | Live recovery TCP uses the scheduler. Policy and service counters are available through the exchange CLI; GUI does not yet graph them. |
+| **Recovery fairness seam** | FCFS and Round Robin are modelled as alternatives at a shared recovery service, instead of artificial network delays. | Live recovery TCP uses the scheduler. Exchange results preserve service distribution, queue waits, and Jain scheduler-service fairness; the dashboard displays the saved values. |
 | **Tamper-evident checkpoint-chain model** | Snapshots include previous hash so retained checkpoints can be checked for modification/link mismatch. | SHA-256 chain verification works. It is not persistent storage or a tamper-proof database. |
 
 Do **not** claim these as completed features:
@@ -451,9 +453,9 @@ Do **not** claim these as completed features:
    `reliable_subscriber` creates two receivers plus `DualFeedSubscriber`.
 3. `RecoveryClient::recover()` is a local demo helper; `RecoveryTcpClient` and
    `RecoveryTcpServer` form the framed live recovery path.
-4. The GUI reliability widgets have no signals, callbacks, bindings, or timers
-   that read `SystemMetrics`. This limitation does not apply to the separate
-   Exchange Control tab, which reads actual C++ process output.
+4. The reliability dashboard launches either the deterministic demo or the
+   real-process runner and reads their persisted final results. It does not
+   consume a continuous C++ telemetry stream or fabricate unavailable metrics.
 5. `RecoveryServer` remains transport-neutral; its TCP listener owns and uses
    the scheduler.
 
@@ -667,8 +669,9 @@ valid checkpoint-chain line.
 5. Open Exchange Control, run two clients, and point out it uses separate TCP
    processes and client-measured acknowledgement RTT.
 6. Open the local GUI visualisation and explain its three working local-simulation graphs.
-7. Show the reliability dashboard, clearly saying it is a planned integration
-   UI scaffold.
+7. Show the reliability dashboard, explaining that its deterministic tab is an
+   in-process harness and its live tab reads persisted real-process results;
+   do not claim socket validation in this sandbox.
 8. If asked about the original exchange, show `OrderBook::TryMatch`,
    `MDAdapter`, and `MarketDataPublisher`.
 

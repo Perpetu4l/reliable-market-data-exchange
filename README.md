@@ -224,8 +224,9 @@ feeds only help when their loss behaviour is not fully correlated.
 This intentionally disables retained event history and creates a checkpoint for
 each event. The output should contain `RECOVERY SNAPSHOT RESYNC` and report a
 successful snapshot recovery. The demo advances sequence continuity after a
-validated checkpoint; it does not yet rebuild a real order book from snapshot
-price levels.
+validated checkpoint. This deterministic harness intentionally models sequence
+resynchronisation only; the separate live subscriber applies absolute snapshot
+price levels to its local `BookBuilder`.
 
 ### 6. View all reliability-demo options
 
