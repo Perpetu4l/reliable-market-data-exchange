@@ -4,7 +4,7 @@ This checklist maps the October 2026 design document to the executable code.
 It is deliberately status-oriented: a design item is not marked complete just
 because an interface or a GUI label exists.
 
-| Requirement | Design reference | Status before this change | Required change / evidence | Verification |
+| Requirement | Design reference | Current status | Implemented evidence | Verification |
 | --- | --- | --- | --- | --- |
 | Central authoritative matching engine and books | 1, 2.1 | Implemented | Preserved in `src/exchange/Exchange.cpp` and `lib/OrderBook/` | Existing order-book tests; TCP workload check |
 | TCP order-entry server and independent clients | 1, 2.1 | Partial: sockets existed, but framing and response handling were incomplete | Complete framed stream parsing, partial-write handling, handshake, response reads and workload executable | Local loopback exchange plus two `workload_client` processes |
@@ -14,12 +14,12 @@ because an interface or a GUI label exists.
 | Automatic real TCP workload | Prompt 3.2, 7 | Missing | `src/workload_client/main.cpp` generates reproducible orders from a separate process and reports client-measured acknowledgement RTT | End-to-end loopback run |
 | Server validation and order lifecycle | Prompt 6 | Partial | Reject zero quantity / invalid limit price; scope client order ids per connection; add modify support through the existing book | Build plus workload acknowledgements |
 | UDP market data | 2.1, 3.1 | Implemented as one existing multicast publisher/receiver | Preserved; public market data remains distinct from private TCP responses | Existing exchange publisher code and receiver |
-| Dual UDP feed endpoints | 2.1, 3.1 | Not implemented; in-process adapters only | Still future work | Reliability unit/demo checks only; do not claim live dual UDP |
-| Sequence tracking, duplicates, bounded replay history | 3.2--3.4 | Implemented in reliability demo | Preserved | `ReliabilitySkeletonTests.cpp` |
-| TCP recovery protocol / shared scheduler | 3.3, 3.6 | API-only in-process recovery | The deterministic demo schedules each recovery via FCFS or Round Robin; a TCP recovery listener remains future work | Demo output and source inspection |
-| Snapshots and tamper-evident chain | 3.5 | In-memory skeleton with FNV-1a placeholder | Still partial: no order-book serialization, no SHA-256 | Snapshot tests and source inspection |
-| Fault injection experiments | 3.7 | Packet loss and duplication in deterministic in-process demo | Still partial: reordering/delay and live sockets are absent | Fault-injector test/demo |
-| Telemetry and CSV | 3.8 | Reliability demo metrics only | Workload clients emit generated/sent/ack/reject/execution/timeout and ACK RTT percentiles; Reliability Experiments renders deterministic-demo metrics and writes its own CSV | GUI-controller end-to-end run |
+| Dual UDP feed endpoints | 2.1, 3.1 | Implemented; normal-host verification pending | Exchange publishes identical binary datagrams to Feed A/B with `--dual-feed`; `reliable_subscriber` joins both endpoints | Build passed; sandbox prohibits multicast/TCP binding |
+| Sequence tracking, duplicates, bounded replay history | 3.2--3.4 | Implemented | Used by `reliable_subscriber`; exchange retains published binary events in bounded history | Reliability source tests; normal-host socket run pending |
+| TCP recovery protocol / shared scheduler | 3.3, 3.6 | Implemented; normal-host verification pending | Framed TCP retained replay, chunked large replies, status reconciliation, and FCFS/Round Robin scheduler | Build passed; sandbox prohibits listener verification |
+| Snapshots and tamper-evident chain | 3.5 | Implemented in memory | Exchange builds composite published-level snapshots; TCP transfer and subscriber application use SHA-256 verification | Codec/source tests; normal-host socket run pending |
+| Fault injection experiments | 3.7 | Implemented at application layer | Deterministic receive-/publisher-side Feed A/B/correlated withholding; reordering/delay remain absent | Build/CLI validation; normal-host socket run pending |
+| Telemetry and CSV | 3.8 | Implemented within stated measurement boundaries | Demo writes CSV; live runner writes provenance-preserving JSON with subscriber integrity/rate/repair-latency and scheduler counters | GUI render and runner failure-path checks passed; normal-host successful run pending |
 | Existing PyQt6 simulator and charts | 4 | Implemented local in-process simulator | Preserve; it must not be labelled as network live data | Start GUI after optional pybind build |
 | Local/dashboard controls and actual backend effects | 4 and prompt 4, 8--11 | Compiled deterministic reliability experiment | Exchange Control has process controller, readiness gate, manual socket form, and result persistence. Reliability Experiments launches `reliability_demo` with its selected loss, feed, snapshot, and scheduler settings and renders final metrics. | GUI-controller end-to-end process run |
 
@@ -33,4 +33,6 @@ physical-network latency claim.
 
 The reliability demo's recovery metrics are generated by its explicitly
 in-process experiment harness. They are useful for controlled design checks,
-but are not measurements from a live TCP recovery service.
+but are not measurements from the live TCP recovery service. The live service
+runner persists final observed counters as JSON, not a time-series. It does
+not claim a continuous live telemetry stream.

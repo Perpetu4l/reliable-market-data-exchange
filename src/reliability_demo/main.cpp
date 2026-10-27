@@ -162,7 +162,7 @@ int main(int argc, char* argv[])
         }
         ++metrics.mutable_metrics().packets_sent;
 
-        if (config.mode == "correlated" && correlated_faults.should_drop()) {
+        if (config.mode == "correlated" && correlated_faults.drops(event)) {
             ++metrics.mutable_metrics().packets_lost;
             std::cout << "CORRELATED LOSS seq=" << sequence << '\n';
             continue;
@@ -175,6 +175,11 @@ int main(int argc, char* argv[])
             ++gaps_avoided_by_second_feed;
         }
     }
+
+    // In the live system this arrives in a non-sequenced HEARTBEAT datagram.
+    // The deterministic driver emits one final heartbeat so dropped tail events
+    // are not silently excluded from the result.
+    subscriber->on_heartbeat(config.event_count);
 
     auto result = metrics.snapshot();
     const auto elapsed_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - experiment_started).count();

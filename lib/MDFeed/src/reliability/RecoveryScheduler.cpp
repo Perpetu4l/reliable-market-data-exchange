@@ -1,5 +1,7 @@
 #include "reliability/RecoveryScheduler.h"
 
+#include <algorithm>
+
 namespace mdfeed::reliability {
 
 RecoveryScheduler::RecoveryScheduler(const SchedulingPolicy policy) : policy_(policy) {}
@@ -35,10 +37,64 @@ std::optional<ScheduledRecovery> RecoveryScheduler::next()
     return next_request;
 }
 
-void RecoveryScheduler::record_completed(const ScheduledRecovery& recovery, const uint64_t messages_recovered)
+void RecoveryScheduler::record_completed(const ScheduledRecovery& recovery, const uint64_t messages_recovered,
+    const uint64_t queue_wait_ns)
 {
     metrics_.messages_recovered += messages_recovered;
+    metrics_.total_queue_wait_ns += queue_wait_ns;
+    metrics_.max_queue_wait_ns = std::max(metrics_.max_queue_wait_ns, queue_wait_ns);
     ++metrics_.per_subscriber_service_distribution[recovery.request.subscriber_id];
+}
+
+BlockingRecoveryScheduler::BlockingRecoveryScheduler(const SchedulingPolicy policy) : scheduler_(policy) {}
+
+void BlockingRecoveryScheduler::enqueue(RecoveryRequest request)
+{
+    {
+        std::lock_guard lock(mutex_);
+        if (stopping_) return;
+        scheduler_.enqueue(std::move(request));
+        ++pending_count_;
+    }
+    ready_.notify_one();
+}
+
+std::optional<ScheduledRecovery> BlockingRecoveryScheduler::wait_next()
+{
+    std::unique_lock lock(mutex_);
+    ready_.wait(lock, [this] { return stopping_ || pending_count_ != 0; });
+    if (pending_count_ == 0) return std::nullopt;
+    auto result = scheduler_.next();
+    if (result) --pending_count_;
+    return result;
+}
+
+void BlockingRecoveryScheduler::stop()
+{
+    {
+        std::lock_guard lock(mutex_);
+        stopping_ = true;
+    }
+    ready_.notify_all();
+}
+
+size_t BlockingRecoveryScheduler::pending_count() const
+{
+    std::lock_guard lock(mutex_);
+    return pending_count_;
+}
+
+void BlockingRecoveryScheduler::record_completed(const ScheduledRecovery& recovery, const uint64_t messages_recovered,
+    const uint64_t queue_wait_ns)
+{
+    std::lock_guard lock(mutex_);
+    scheduler_.record_completed(recovery, messages_recovered, queue_wait_ns);
+}
+
+RecoverySchedulerMetrics BlockingRecoveryScheduler::metrics() const
+{
+    std::lock_guard lock(mutex_);
+    return scheduler_.metrics();
 }
 
 } // namespace mdfeed::reliability

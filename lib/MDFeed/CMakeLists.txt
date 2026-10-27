@@ -18,6 +18,10 @@ set(HEADER_FILES
         include/reliability/FaultInjector.h
         include/reliability/Experiments.h
         include/reliability/Metrics.h
+        include/reliability/Sha256.h
+        include/reliability/BookBuilder.h
+        include/reliability/RecoveryWire.h
+        include/reliability/RecoveryTcp.h
 )
 
 set(SOURCE_FILES
@@ -34,6 +38,10 @@ set(SOURCE_FILES
         src/reliability/FaultInjector.cpp
         src/reliability/Experiments.cpp
         src/reliability/Metrics.cpp
+        src/reliability/Sha256.cpp
+        src/reliability/BookBuilder.cpp
+        src/reliability/RecoveryWire.cpp
+        src/reliability/RecoveryTcp.cpp
 )
 
 add_library(MDFeed STATIC ${SOURCE_FILES} ${HEADER_FILES})
@@ -41,4 +49,4 @@ add_library(MDFeed STATIC ${SOURCE_FILES} ${HEADER_FILES})
 target_include_directories(MDFeed PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 find_package(Threads REQUIRED)
-target_link_libraries(MDFeed Threads::Threads)
+target_link_libraries(MDFeed PUBLIC Threads::Threads Boost::headers)

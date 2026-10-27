@@ -13,6 +13,9 @@ enum class RecoveryStatus { OK, TOO_OLD, BAD_REQUEST, ERROR };
 struct RecoveryRequest {
     std::string subscriber_id;
     MissingRange missing_range;
+    // Assigned by the TCP server after decoding. This is an in-process
+    // correlation token and is intentionally not part of the wire format.
+    uint64_t request_id{0};
 };
 
 struct RecoveryResponse {
@@ -22,12 +25,18 @@ struct RecoveryResponse {
     std::string detail;
 };
 
+struct RecoveryStatusInfo {
+    uint64_t latest_sequence{0};
+    uint64_t history_minimum_sequence{0};
+};
+
 // Application-facing recovery service. TCP framing, authentication, and I/O are deferred.
 class RecoveryServer {
 public:
     RecoveryServer(std::shared_ptr<RecoveryHistory> history, std::shared_ptr<SnapshotManager> snapshots);
     [[nodiscard]] RecoveryResponse request_missing_data(const RecoveryRequest& request) const;
     [[nodiscard]] RecoveryResponse send_snapshot(uint64_t sequence) const;
+    [[nodiscard]] RecoveryStatusInfo status() const;
 private:
     std::shared_ptr<RecoveryHistory> history_;
     std::shared_ptr<SnapshotManager> snapshots_;

@@ -53,10 +53,12 @@ class ReliabilityDashboard(QTabWidget):
         self.addTab(self._scroll([self.integrity]), "Checkpoint Integrity")
 
         self.experiment.start_button.clicked.connect(self._start)
+        self.experiment.live_start_button.clicked.connect(self._start_live)
         self.experiment.stop_button.clicked.connect(self.controller.stop)
         self.controller.log_line.connect(self._append_log)
         self.controller.status_changed.connect(self.experiment.status.setText)
         self.controller.result_ready.connect(self._apply_result)
+        self.controller.live_result_ready.connect(self._apply_live_result)
         self.controller.result_saved.connect(lambda path: self._append_log(f"Saved results to {path}"))
         self.experiment.mode.currentIndexChanged.connect(self.redundancy.mode.setCurrentIndex)
         self.redundancy.mode.currentIndexChanged.connect(self.experiment.mode.setCurrentIndex)
@@ -99,6 +101,22 @@ class ReliabilityDashboard(QTabWidget):
         self.controller.start({
             "mode": self.experiment.mode.currentData(),
             "events": self.experiment.events.value(),
+            "loss_rate": self.experiment.loss_rate.value(),
+            "seed": self.experiment.seed.value(),
+            "history": self.experiment.history.value(),
+            "snapshots_enabled": self.snapshot.enabled.isChecked(),
+            "snapshot_interval": self.snapshot.interval.value(),
+            "retention": self.snapshot.retention.value(),
+            "scheduler": "round-robin" if self.fairness.policy.currentText() == "Round Robin" else "fcfs",
+        })
+
+    def _start_live(self) -> None:
+        self.log.clear()
+        self.summary.setText("Starting real local exchange and subscriber processes...")
+        self.controller.start_live({
+            "mode": self.experiment.mode.currentData(),
+            "duration": self.experiment.live_duration.value(),
+            "subscribers": self.experiment.live_subscribers.value(),
             "loss_rate": self.experiment.loss_rate.value(),
             "seed": self.experiment.seed.value(),
             "history": self.experiment.history.value(),
@@ -154,6 +172,81 @@ class ReliabilityDashboard(QTabWidget):
             self.latency_chart,
             ["p50", "p95", "p99"], [p50_us, p95_us, p99_us], "#b35cba",
         )
+        self.setCurrentIndex(0)
+
+    def _apply_live_result(self, result: dict) -> None:
+        """Present only counters saved by the real multi-process runner."""
+        raw_metrics = result.get("subscriber_metrics") or {}
+        single_subscriber_metrics = None
+        if raw_metrics and all(isinstance(value, dict) for value in raw_metrics.values()):
+            if len(raw_metrics) == 1:
+                single_subscriber_metrics = next(iter(raw_metrics.values()))
+            # A live multi-subscriber run persists one observed record per
+            # process. Aggregate count fields only; it does not fabricate
+            # latency or a synthetic per-subscriber state.
+            fields = ("delivered", "duplicates", "gaps", "recovery_requests", "recovered_events",
+                      "snapshot_recoveries", "events_covered_by_snapshot", "permanently_lost",
+                      "recovery_failures")
+            metrics = {field: str(sum(int(record.get(field, "0")) for record in raw_metrics.values()))
+                       for field in fields}
+        else:
+            metrics = raw_metrics
+        exchange = result.get("exchange_metrics") or {}
+        value = lambda key: metrics.get(key, "0")
+        exchange_value = lambda key: exchange.get(key, "Unavailable")
+        success = bool(result.get("success"))
+        if single_subscriber_metrics:
+            rate = float(single_subscriber_metrics.get("delivered_events_per_second", "0"))
+            self.metrics.throughput.setText(f"{rate:,.1f} delivered events/s")
+            p50_us = float(single_subscriber_metrics.get("recovery_p50_ns", "0")) / 1_000.0
+            p95_us = float(single_subscriber_metrics.get("recovery_p95_ns", "0")) / 1_000.0
+            p99_us = float(single_subscriber_metrics.get("recovery_p99_ns", "0")) / 1_000.0
+            has_recovery_latency = int(value("recovery_requests")) > 0
+        else:
+            self.metrics.throughput.setText("Per-subscriber rate; not aggregated")
+            p50_us = p95_us = p99_us = 0.0
+            has_recovery_latency = False
+        self.metrics.duplicates.setText(value("duplicates"))
+        self.metrics.gaps.setText(value("gaps"))
+        self.metrics.recovery_percentiles.setText(
+            f"p50/p95/p99: {p50_us:.1f}/{p95_us:.1f}/{p99_us:.1f} µs"
+            if has_recovery_latency else "No successful recovery measured")
+        self.recovery.gap_label.setText("No gap detected" if value("gaps") == "0" else f"{value('gaps')} detected gap(s)")
+        self.recovery.request_label.setText(
+            f"{value('recovery_requests')} request(s), {value('recovered_events')} replayed event(s)")
+        self.recovery.latency_label.setText(
+            f"p50 {p50_us:.1f} µs (TCP repair)" if has_recovery_latency else "No successful recovery measured")
+        self.redundancy.feed_a.setText(f"{exchange_value('feed_a_app_dropped')} application drop(s)")
+        self.redundancy.feed_b.setText(f"{exchange_value('feed_b_app_dropped')} application drop(s)")
+        self.redundancy.avoided_gaps.setText("Not derived by live subscriber")
+        self.snapshot.status.setText(
+            f"{exchange_value('snapshots_retained')} retained; {value('snapshot_recoveries')} applied; "
+            f"{value('events_covered_by_snapshot')} event(s) covered")
+        self.integrity.latest_hash.setText("See subscriber/event log")
+        self.integrity.chain_status.setText("Verified per applied checkpoint" if int(value("snapshot_recoveries")) else "No snapshot applied")
+        self.fairness.waiting_time.setText(
+            f"avg/max {exchange_value('recovery_avg_queue_wait_ns')}/"
+            f"{exchange_value('recovery_max_queue_wait_ns')} ns")
+        fairness_ppm = exchange_value("recovery_fairness_jain_ppm")
+        fairness = "Unavailable" if fairness_ppm == "Unavailable" else f"{float(fairness_ppm) / 1_000_000:.4f}"
+        self.fairness.service_distribution.setText(
+            f"{exchange_value('recovery_service_distribution')} served; Jain service fairness {fairness}")
+        self.delivery_chart.clear()
+        self._bars(self.delivery_chart,
+                   ["Delivered", "Snapshot\ncovered", "Duplicates", "Gaps", "Replayed", "Unresolved"],
+                   [float(value("delivered")), float(value("events_covered_by_snapshot")),
+                    float(value("duplicates")), float(value("gaps")),
+                    float(value("recovered_events")), float(value("permanently_lost"))], "#2677c9")
+        if has_recovery_latency:
+            self._bars(self.latency_chart, ["p50", "p95", "p99"],
+                       [p50_us, p95_us, p99_us], "#b35cba")
+        else:
+            self.latency_chart.clear()
+        self.summary.setText(
+            "Live run completed: the exchange sequence was fully accounted for."
+            if success else
+            f"Live run failed integrity validation: {value('permanently_lost')} unaccounted event(s), "
+            f"{value('recovery_failures')} recovery failure(s). Inspect the persisted result and log below.")
         self.setCurrentIndex(0)
 
     def _append_log(self, line: str) -> None:

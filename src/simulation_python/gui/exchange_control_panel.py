@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -250,8 +251,9 @@ class ExchangeControlPanel(QWidget):
         layout = QVBoxLayout(page)
         explanation = QLabel(
             "Only completed runs are shown. Workload CSVs contain one row per independent TCP client; reliability CSVs "
-            "contain the selected deterministic-demo configuration and measured result. Select a file to inspect the exact "
-            "persisted values. Incomplete or stopped workloads are deliberately not saved as successful runs."
+            "contain the selected deterministic-demo configuration and measured result. Live-reliability JSON records both "
+            "successful and failed real-process runs with their exact configuration and log tail. Select a file to inspect "
+            "persisted values; failed runs are visibly labelled and never treated as completed measurements."
         )
         explanation.setWordWrap(True)
         layout.addWidget(explanation)
@@ -277,11 +279,21 @@ class ExchangeControlPanel(QWidget):
         self.saved_results.clear()
         output_dir = REPOSITORY_ROOT / "results"
         paths = sorted(
-            [*output_dir.glob("workload-*.csv"), *output_dir.glob("reliability-*.csv")],
+            [*output_dir.glob("workload-*.csv"), *output_dir.glob("reliability-*.csv"),
+             *output_dir.glob("live-reliability-*.json")],
             reverse=True,
         )
         for path in paths:
-            category = "Workload" if path.name.startswith("workload-") else "Reliability"
+            if path.name.startswith("workload-"):
+                category = "Workload"
+            elif path.name.startswith("live-reliability-"):
+                try:
+                    success = bool(json.loads(path.read_text(encoding="utf-8")).get("success"))
+                    category = "Live reliability" if success else "Live reliability — failed"
+                except (OSError, json.JSONDecodeError):
+                    category = "Live reliability — unreadable"
+            else:
+                category = "Reliability demo"
             item = QListWidgetItem(f"[{category}] {path.name}")
             item.setData(Qt.ItemDataRole.UserRole, str(path))
             self.saved_results.addItem(item)

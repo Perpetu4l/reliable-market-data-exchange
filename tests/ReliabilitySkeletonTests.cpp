@@ -1,12 +1,17 @@
 #include "reliability/DualFeed.h"
+#include "reliability/BookBuilder.h"
 #include "reliability/Experiments.h"
 #include "reliability/FaultInjector.h"
 #include "reliability/RecoveryHistory.h"
 #include "reliability/RecoveryProtocol.h"
 #include "reliability/RecoveryScheduler.h"
+#include "reliability/RecoveryWire.h"
 #include "reliability/Snapshot.h"
+#include "reliability/Sha256.h"
 
 #include <gtest/gtest.h>
+
+#include <cstring>
 
 using namespace mdfeed::reliability;
 
@@ -15,6 +20,16 @@ MarketDataEvent event(const uint64_t sequence)
 {
     MarketDataEvent result;
     result.header.sequence_number = sequence;
+    return result;
+}
+
+template <typename T>
+MarketDataEvent packaged_event(const T& message)
+{
+    MarketDataEvent result;
+    result.header = message.header;
+    result.payload.resize(sizeof(T));
+    std::memcpy(result.payload.data(), &message, sizeof(T));
     return result;
 }
 }
@@ -30,6 +45,42 @@ TEST(SequenceTrackerTests, DetectsGapAndDuplicate)
     EXPECT_EQ(tracker.on_event(event(3)).disposition, SequenceDisposition::DUPLICATE);
 }
 
+// Regression for B2: the market-data sequence domain is global and begins at
+// one. A late first datagram must reveal the missing head range instead of
+// silently redefining the start of the stream.
+TEST(SequenceTrackerTests, DetectsMissingHeadFromGlobalSequenceStart)
+{
+    SequenceTracker tracker;
+    const auto observation = tracker.on_event(event(6));
+    ASSERT_EQ(observation.disposition, SequenceDisposition::GAP_DETECTED);
+    ASSERT_TRUE(observation.missing_range.has_value());
+    EXPECT_EQ(observation.missing_range->start_sequence, 1);
+    EXPECT_EQ(observation.missing_range->end_sequence, 5);
+}
+
+TEST(SequenceTrackerTests, HeartbeatDetectsMissingTail)
+{
+    SequenceTracker tracker;
+    EXPECT_EQ(tracker.on_event(event(1)).disposition, SequenceDisposition::ACCEPTED);
+    const auto observation = tracker.on_heartbeat(3);
+    ASSERT_EQ(observation.disposition, SequenceDisposition::GAP_DETECTED);
+    ASSERT_TRUE(observation.missing_range.has_value());
+    EXPECT_EQ(observation.missing_range->start_sequence, 2);
+    EXPECT_EQ(observation.missing_range->end_sequence, 3);
+}
+
+TEST(SequenceTrackerTests, ClearsGapAfterRecoveryAndDoesNotCountRepeatedHeartbeat)
+{
+    SequenceTracker tracker;
+    EXPECT_EQ(tracker.on_event(event(3)).disposition, SequenceDisposition::GAP_DETECTED);
+    EXPECT_EQ(tracker.gap_count(), 1U);
+    EXPECT_EQ(tracker.on_heartbeat(3).disposition, SequenceDisposition::GAP_DETECTED);
+    EXPECT_EQ(tracker.gap_count(), 1U);
+    tracker.on_event(event(1));
+    tracker.on_event(event(2));
+    EXPECT_FALSE(tracker.has_gap());
+}
+
 TEST(RecoveryHistoryTests, RejectsRangeOutsideBoundedHistory)
 {
     RecoveryHistory history(2);
@@ -38,6 +89,88 @@ TEST(RecoveryHistoryTests, RejectsRangeOutsideBoundedHistory)
     history.append(event(3));
     EXPECT_FALSE(history.get_range({1, 1}).has_value());
     EXPECT_TRUE(history.get_range({2, 3}).has_value());
+    EXPECT_EQ(history.minimum_sequence(), 2);
+    EXPECT_EQ(history.latest_sequence(), 3);
+}
+
+TEST(RecoveryWireTests, RoundTripsPartialFramedRequest)
+{
+    const RecoveryRequest source{"subscriber-1", {10, 20}};
+    const auto bytes = RecoveryWireCodec::frame(RecoveryWireType::RECOVERY_REQUEST,
+        RecoveryWireCodec::encode_request(source));
+    std::vector<uint8_t> stream(bytes.begin(), bytes.begin() + 3);
+    std::string error;
+    EXPECT_FALSE(RecoveryWireCodec::take_frame(stream, error).has_value());
+    stream.insert(stream.end(), bytes.begin() + 3, bytes.end());
+    const auto frame = RecoveryWireCodec::take_frame(stream, error);
+    ASSERT_TRUE(frame.has_value()) << error;
+    ASSERT_EQ(frame->type, RecoveryWireType::RECOVERY_REQUEST);
+    const auto decoded = RecoveryWireCodec::decode_request(frame->payload, error);
+    ASSERT_TRUE(decoded.has_value()) << error;
+    EXPECT_EQ(decoded->subscriber_id, source.subscriber_id);
+    EXPECT_EQ(decoded->request_id, 0U); // server-only correlation never crosses the wire
+    EXPECT_EQ(decoded->missing_range.start_sequence, 10);
+    EXPECT_EQ(decoded->missing_range.end_sequence, 20);
+}
+
+TEST(RecoveryWireTests, RejectsOversizedFrame)
+{
+    std::vector<uint8_t> stream{0xff, 0xff, 0xff, 0xff};
+    std::string error;
+    EXPECT_FALSE(RecoveryWireCodec::take_frame(stream, error).has_value());
+    EXPECT_EQ(error, "invalid recovery frame length");
+}
+
+TEST(RecoveryWireTests, RoundTripsStatusResponse)
+{
+    const RecoveryStatusInfo source{200, 101};
+    const auto payload = RecoveryWireCodec::encode_status_response(source);
+    std::string error;
+    const auto decoded = RecoveryWireCodec::decode_status_response(payload, error);
+    ASSERT_TRUE(decoded.has_value()) << error;
+    EXPECT_EQ(decoded->latest_sequence, 200U);
+    EXPECT_EQ(decoded->history_minimum_sequence, 101U);
+}
+
+TEST(RecoveryWireTests, AcceptsChunkAndCompletionFrames)
+{
+    MarketDataEvent source;
+    source.header.sequence_number = 12;
+    source.payload.resize(sizeof(MessageHeader));
+    std::memcpy(source.payload.data(), &source.header, sizeof(MessageHeader));
+    const auto chunk_payload = RecoveryWireCodec::encode_response(
+        {RecoveryStatus::OK, {source}, std::nullopt, {}});
+    auto stream = RecoveryWireCodec::frame(RecoveryWireType::RECOVERY_CHUNK, chunk_payload);
+    const auto complete = RecoveryWireCodec::frame(RecoveryWireType::RECOVERY_COMPLETE, {});
+    stream.insert(stream.end(), complete.begin(), complete.end());
+    std::string error;
+    const auto chunk = RecoveryWireCodec::take_frame(stream, error);
+    ASSERT_TRUE(chunk.has_value()) << error;
+    EXPECT_EQ(chunk->type, RecoveryWireType::RECOVERY_CHUNK);
+    const auto decoded = RecoveryWireCodec::decode_response(chunk->payload, error);
+    ASSERT_TRUE(decoded.has_value()) << error;
+    ASSERT_EQ(decoded->events.size(), 1U);
+    EXPECT_EQ(decoded->events.front().header.sequence_number, 12U);
+    const auto end = RecoveryWireCodec::take_frame(stream, error);
+    ASSERT_TRUE(end.has_value()) << error;
+    EXPECT_EQ(end->type, RecoveryWireType::RECOVERY_COMPLETE);
+    EXPECT_TRUE(end->payload.empty());
+}
+
+TEST(RecoveryWireTests, RoundTripsVerifiableCompositeSnapshot)
+{
+    SnapshotManager manager({1, 4, true});
+    auto snapshot = manager.create_snapshot(10, 0,
+        {{100, 2, Side::BUY, 7}, {101, 3, Side::SELL, 8}}, 1234);
+    RecoveryResponse source{RecoveryStatus::OK, {}, snapshot, {}};
+    const auto payload = RecoveryWireCodec::encode_snapshot_response(source);
+    std::string error;
+    const auto decoded = RecoveryWireCodec::decode_snapshot_response(payload, error);
+    ASSERT_TRUE(decoded.has_value()) << error;
+    ASSERT_TRUE(decoded->snapshot.has_value());
+    EXPECT_EQ(decoded->snapshot->sequence_number, 10U);
+    EXPECT_EQ(decoded->snapshot->book_state.size(), 2U);
+    EXPECT_TRUE(SnapshotHasher{}.verify(*decoded->snapshot));
 }
 
 TEST(DualFeedSubscriberTests, ReplaysGapBeforeBufferedLaterEvent)
@@ -91,6 +224,76 @@ TEST(SnapshotManagerTests, CreatesVerifiableHashChain)
     EXPECT_TRUE(manager.verify_snapshots());
 }
 
+TEST(Sha256Tests, MatchesNistVectors)
+{
+    EXPECT_EQ(Sha256::hex_digest(""), "e3b0c44298fc1c149afbf4c8996fb924"
+        "27ae41e4649b934ca495991b7852b855");
+    EXPECT_EQ(Sha256::hex_digest("abc"), "ba7816bf8f01cfea414140de5dae2223"
+        "b00361a396177a9cb410ff61f20015ad");
+    EXPECT_EQ(Sha256::hex_digest("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+        "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
+}
+
+TEST(SnapshotManagerTests, RejectsTamperedSnapshot)
+{
+    SnapshotManager manager({1, 2, true});
+    auto snapshot = manager.create_snapshot(1, 7, {{100, 2, Side::BUY}}, 100);
+    ++snapshot.book_state.front().quantity;
+    manager.store_snapshot(std::move(snapshot));
+    EXPECT_FALSE(manager.verify_snapshots());
+}
+
+TEST(SnapshotManagerTests, FindsCheckpointAtOrAfterRecoveryRange)
+{
+    SnapshotManager manager({1, 4, true});
+    manager.store_snapshot(manager.create_snapshot(10, 0, {}, 10));
+    manager.store_snapshot(manager.create_snapshot(20, 0, {}, 20));
+    const auto snapshot = manager.get_snapshot_at_or_after(15);
+    ASSERT_TRUE(snapshot.has_value());
+    EXPECT_EQ(snapshot->sequence_number, 20U);
+}
+
+TEST(RecoverySchedulerTests, RecordsQueueWaitAndServiceDistribution)
+{
+    RecoveryScheduler scheduler(SchedulingPolicy::FCFS);
+    scheduler.enqueue({"first", {1, 1}});
+    const auto scheduled = scheduler.next();
+    ASSERT_TRUE(scheduled.has_value());
+    scheduler.record_completed(*scheduled, 1, 250);
+    const auto& metrics = scheduler.metrics();
+    EXPECT_EQ(metrics.recovery_request_count, 1U);
+    EXPECT_EQ(metrics.messages_recovered, 1U);
+    EXPECT_EQ(metrics.total_queue_wait_ns, 250U);
+    EXPECT_EQ(metrics.max_queue_wait_ns, 250U);
+    EXPECT_EQ(metrics.per_subscriber_service_distribution.at("first"), 1U);
+}
+
+TEST(BookBuilderTests, AppliesAbsolutePriceLevelUpdatesAndDeletes)
+{
+    BookBuilder builder;
+    PriceLevelUpdateMessage update{};
+    message_utils::init_header(update, MessageType::PRICE_LEVEL_UPDATE, 1, 7);
+    update.price = 50000;
+    update.quantity = 10;
+    update.side = Side::BUY;
+    update.action = UpdateAction::NEW;
+    ASSERT_TRUE(builder.apply(packaged_event(update)));
+
+    update.header.sequence_number = 2;
+    update.quantity = 25; // CHANGE is an absolute level quantity, not a delta.
+    update.action = UpdateAction::CHANGE;
+    ASSERT_TRUE(builder.apply(packaged_event(update)));
+    ASSERT_EQ(builder.levels(7).size(), 1);
+    EXPECT_EQ(builder.levels(7).front().quantity, 25);
+
+    PriceLevelDeleteMessage deletion{};
+    message_utils::init_header(deletion, MessageType::PRICE_LEVEL_DELETE, 3, 7);
+    deletion.price = 50000;
+    deletion.side = Side::BUY;
+    ASSERT_TRUE(builder.apply(packaged_event(deletion)));
+    EXPECT_TRUE(builder.levels(7).empty());
+}
+
 TEST(SnapshotManagerTests, VerifiesTheRetainedSegmentOfAHashChain)
 {
     SnapshotManager manager({1, 2, true});
@@ -110,10 +313,30 @@ TEST(RecoverySchedulerTests, CanInstantiateBothPolicies)
     EXPECT_TRUE(round_robin.next().has_value());
 }
 
+TEST(RecoverySchedulerTests, RoundRobinAlternatesSubscribersUnderContention)
+{
+    RecoveryScheduler scheduler(SchedulingPolicy::ROUND_ROBIN);
+    scheduler.enqueue({"noisy", {1, 1}});
+    scheduler.enqueue({"noisy", {2, 2}});
+    scheduler.enqueue({"quiet", {3, 3}});
+    ASSERT_EQ(scheduler.next()->request.subscriber_id, "noisy");
+    ASSERT_EQ(scheduler.next()->request.subscriber_id, "quiet");
+    ASSERT_EQ(scheduler.next()->request.subscriber_id, "noisy");
+}
+
 TEST(FaultInjectorTests, UsesSeededConfiguration)
 {
     FaultInjector injector({1.0, 0.0, 0.0, {}, 123});
     EXPECT_TRUE(injector.apply(event(1)).empty());
+}
+
+TEST(FaultInjectorTests, SequenceDecisionsAreTimingIndependent)
+{
+    FaultInjector first({0.35, 0.25, 0.0, {}, 123});
+    FaultInjector second({0.35, 0.25, 0.0, {}, 123});
+    for (uint64_t sequence = 1; sequence <= 100; ++sequence) {
+        EXPECT_EQ(first.apply(event(sequence)).size(), second.apply(event(sequence)).size());
+    }
 }
 
 TEST(RedundancyExperimentTests, RecordsDesignLevelMetrics)

@@ -1,6 +1,9 @@
 #include "Exchange.h"
 #include <utility>
 #include <sys/socket.h>
+#include <cstring>
+#include <algorithm>
+#include <sstream>
 
 Exchange::Exchange(const Mode mode, mdfeed::PublisherConfig md_config, const uint16_t oe_port)
     : mode_(mode), running_(false), md_config_(std::move(md_config)),
@@ -8,8 +11,36 @@ Exchange::Exchange(const Mode mode, mdfeed::PublisherConfig md_config, const uin
       quantity_dist_(100, 20), bool_dist_(0.5)
 {
     md_publisher_ = std::make_unique<mdfeed::MarketDataPublisher>(md_config_);
+    recovery_history_ = std::make_shared<mdfeed::reliability::RecoveryHistory>(
+        md_config_.recovery_history_events);
+    snapshot_manager_ = std::make_shared<mdfeed::reliability::SnapshotManager>(
+        mdfeed::reliability::SnapshotConfig{md_config_.snapshot_interval_events,
+            md_config_.snapshot_retention_count, md_config_.snapshot_interval_events != 0});
+    market_data_book_builder_ = std::make_shared<mdfeed::reliability::BookBuilder>();
+    recovery_service_ = std::make_shared<mdfeed::reliability::RecoveryServer>(
+        recovery_history_, snapshot_manager_);
+    if (md_config_.recovery_port != 0) {
+        recovery_tcp_server_ = std::make_unique<mdfeed::reliability::RecoveryTcpServer>(
+            mdfeed::reliability::RecoveryTcpServer::Config{md_config_.recovery_port,
+                md_config_.recovery_scheduling_policy == "round-robin"
+                    ? mdfeed::reliability::SchedulingPolicy::ROUND_ROBIN
+                    : mdfeed::reliability::SchedulingPolicy::FCFS}, recovery_service_);
+    }
     multicast_thread_ = std::make_unique<
-        mdfeed::MulticastPublisherThread>(md_publisher_->get_ring_buffer(), md_config_);
+        mdfeed::MulticastPublisherThread>(md_publisher_->get_ring_buffer(), md_config_,
+            [history = recovery_history_, snapshots = snapshot_manager_, books = market_data_book_builder_]
+            (const mdfeed::MessageBuffer& buffer) {
+                if (buffer.length < sizeof(mdfeed::MessageHeader)) return;
+                mdfeed::reliability::MarketDataEvent event;
+                std::memcpy(&event.header, buffer.data, sizeof(event.header));
+                event.payload.assign(reinterpret_cast<const uint8_t*>(buffer.data),
+                    reinterpret_cast<const uint8_t*>(buffer.data) + buffer.length);
+                history->append(event);
+                if (books->apply(event) && snapshots->should_checkpoint(event.header.sequence_number)) {
+                    snapshots->store_snapshot(snapshots->create_snapshot(event.header.sequence_number,
+                        0, books->all_levels(), event.header.timestamp_ns));
+                }
+            });
 
     symbol_manager_ = std::make_unique<SymbolManager>(*md_publisher_);
 
@@ -26,10 +57,21 @@ bool Exchange::start()
         std::cerr << "Failed to start multicast publisher thread" << std::endl;
         return false;
     }
+    if (recovery_tcp_server_) {
+        std::string recovery_error;
+        if (!recovery_tcp_server_->start(recovery_error)) {
+            std::cerr << "Failed to start recovery TCP server: " << recovery_error << std::endl;
+            multicast_thread_->stop();
+            return false;
+        }
+        std::cout << "Recovery TCP server listening on 0.0.0.0:"
+                  << recovery_tcp_server_->port() << std::endl;
+    }
     if (mode_ == Mode::CLIENT_ORDERS) {
         std::cout << "Starting Order Entry Server on port " << order_entry_port_ << "..." << std::endl;
         if (!order_server_->start()) {
             std::cerr << "Failed to start order entry server" << std::endl;
+            if (recovery_tcp_server_) recovery_tcp_server_->stop();
             multicast_thread_->stop();
             return false;
         }
@@ -55,6 +97,7 @@ void Exchange::stop()
     std::cout << "Stopping Enhanced Exchange..." << std::endl;
     running_.store(false);
     if (order_server_) { order_server_->stop(); }
+    if (recovery_tcp_server_) { recovery_tcp_server_->stop(); }
     if (multicast_thread_) { multicast_thread_->stop(); }
     print_final_stats();
 }
@@ -437,9 +480,21 @@ void Exchange::print_supported_symbols() const
 void Exchange::print_final_stats() const
 {
     const auto stats = multicast_thread_->get_stats();
+    uint64_t recovery_connections = 0;
+    uint64_t recovery_requests = 0;
+    uint64_t recovery_responses = 0;
+    uint64_t recovery_messages = 0;
+    uint64_t recovery_average_wait = 0;
+    uint64_t recovery_max_wait = 0;
+    uint64_t recovery_subscribers = 0;
+    uint64_t recovery_fairness_jain_ppm = 0;
+    std::string recovery_service_distribution{"none"};
     std::cout << "\n=== FINAL EXCHANGE STATISTICS ===" << std::endl;
     std::cout << "Market Data Messages sent: " << stats.messages_sent << std::endl;
     std::cout << "Market Data Send failures: " << stats.send_failures << std::endl;
+    std::cout << "Feed A/B successful sends: " << stats.feed_a_sent << '/' << stats.feed_b_sent << std::endl;
+    std::cout << "Feed A/B application-layer drops: " << stats.feed_a_app_dropped << '/'
+              << stats.feed_b_app_dropped << std::endl;
 
     if (order_server_) {
         const auto stats = order_server_->get_stats();
@@ -447,6 +502,56 @@ void Exchange::print_final_stats() const
         std::cout << "Order Entry Total connections: " << stats.connections << std::endl;
         std::cout << "Order Entry malformed frames: " << stats.malformed_messages << std::endl;
         std::cout << "Order Entry queue overflows: " << stats.queue_overflows << std::endl;
+    }
+
+    if (recovery_tcp_server_) {
+        const auto recovery = recovery_tcp_server_->stats();
+        const auto scheduler = recovery_tcp_server_->scheduler_metrics();
+        const auto average_wait = scheduler.recovery_request_count == 0 ? 0
+            : scheduler.total_queue_wait_ns / scheduler.recovery_request_count;
+        recovery_connections = recovery.connections;
+        recovery_requests = recovery.requests_received;
+        recovery_responses = recovery.responses_sent;
+        recovery_messages = scheduler.messages_recovered;
+        recovery_average_wait = average_wait;
+        recovery_max_wait = scheduler.max_queue_wait_ns;
+        recovery_subscribers = scheduler.per_subscriber_service_distribution.size();
+        if (!scheduler.per_subscriber_service_distribution.empty()) {
+            std::vector<std::pair<std::string, uint64_t>> served(
+                scheduler.per_subscriber_service_distribution.begin(),
+                scheduler.per_subscriber_service_distribution.end());
+            std::sort(served.begin(), served.end());
+            uint64_t total = 0;
+            uint64_t sum_of_squares = 0;
+            std::ostringstream encoded;
+            for (size_t index = 0; index < served.size(); ++index) {
+                total += served[index].second;
+                sum_of_squares += served[index].second * served[index].second;
+                if (index != 0) encoded << ',';
+                encoded << served[index].first << ':' << served[index].second;
+            }
+            recovery_service_distribution = encoded.str();
+            // Scheduler-service fairness only; this is not a claim about
+            // network delivery fairness. Scale Jain's index for parsing.
+            if (sum_of_squares != 0) {
+                recovery_fairness_jain_ppm = static_cast<uint64_t>(
+                    (static_cast<long double>(total) * total * 1'000'000.0L)
+                    / (static_cast<long double>(served.size()) * sum_of_squares));
+            }
+        }
+        std::cout << "Recovery TCP connections: " << recovery.connections << std::endl;
+        std::cout << "Recovery TCP requests/responses: " << recovery.requests_received << '/'
+                  << recovery.responses_sent << std::endl;
+        std::cout << "Recovery TCP malformed/send failures: " << recovery.malformed_frames << '/'
+                  << recovery.send_failures << std::endl;
+        std::cout << "Recovery scheduler requests/messages: " << scheduler.recovery_request_count << '/'
+                  << scheduler.messages_recovered << std::endl;
+        std::cout << "Recovery queue wait avg/max ns: " << average_wait << '/'
+                  << scheduler.max_queue_wait_ns << std::endl;
+        std::cout << "Recovery subscribers served: "
+                  << scheduler.per_subscriber_service_distribution.size() << std::endl;
+        std::cout << "Recovery service distribution: " << recovery_service_distribution
+                  << " (Jain fairness ppm " << recovery_fairness_jain_ppm << ")" << std::endl;
     }
 
     for (const auto symbols = symbol_manager_->get_all_symbols();
@@ -457,4 +562,21 @@ void Exchange::print_final_stats() const
                     GetOrdersMatched() << std::endl;
         }
     }
+    std::cout << "EXCHANGE_RESULT md_messages_sent=" << stats.messages_sent
+              << " feed_a_sent=" << stats.feed_a_sent
+              << " feed_b_sent=" << stats.feed_b_sent
+              << " feed_a_app_dropped=" << stats.feed_a_app_dropped
+              << " feed_b_app_dropped=" << stats.feed_b_app_dropped
+              << " md_send_failures=" << stats.send_failures
+              << " recovery_connections=" << recovery_connections
+              << " recovery_requests=" << recovery_requests
+              << " recovery_responses=" << recovery_responses
+              << " recovery_messages=" << recovery_messages
+              << " recovery_avg_queue_wait_ns=" << recovery_average_wait
+              << " recovery_max_queue_wait_ns=" << recovery_max_wait
+              << " recovery_subscribers=" << recovery_subscribers
+              << " recovery_fairness_jain_ppm=" << recovery_fairness_jain_ppm
+              << " recovery_service_distribution=" << recovery_service_distribution
+              << " snapshots_retained=" << snapshot_manager_->snapshot_count()
+              << '\n';
 }

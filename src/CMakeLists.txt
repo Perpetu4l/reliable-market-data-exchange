@@ -23,3 +23,12 @@ target_link_libraries(workload_client OrderEntry)
 
 add_executable(reliability_demo reliability_demo/main.cpp)
 target_link_libraries(reliability_demo MDFeed)
+
+# A narrow command-line verifier for the live recovery TCP endpoint. It does
+# not fabricate market data: every displayed event came from the exchange's
+# retained publisher history.
+add_executable(recovery_client recovery_client/main.cpp)
+target_link_libraries(recovery_client MDFeed)
+
+add_executable(reliable_subscriber reliable_subscriber/main.cpp)
+target_link_libraries(reliable_subscriber MDFeed)

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <deque>
 #include <optional>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -21,6 +22,10 @@ struct SnapshotPriceLevel {
     uint64_t price{0};
     uint64_t quantity{0};
     Side side{Side::BUY};
+    // Zero is retained for backwards-compatible single-instrument snapshots.
+    // Live exchange checkpoints use an instrument id per level and set the
+    // snapshot-level instrument_id to zero, denoting a composite checkpoint.
+    uint32_t instrument_id{0};
 };
 
 struct OrderBookSnapshot {
@@ -32,7 +37,9 @@ struct OrderBookSnapshot {
     std::string hash;
 };
 
-// FNV-1a is used only as a deterministic design placeholder, not as a cryptographic claim.
+// Checkpoints are tamper-evident, not a tamper-proof database. Hash material
+// uses fixed-width big-endian fields and levels sorted by (side, price), then
+// includes the previous checkpoint's SHA-256 hex digest.
 class SnapshotHasher {
 public:
     [[nodiscard]] std::string compute_hash(const OrderBookSnapshot& snapshot, std::string_view previous_hash) const;
@@ -46,6 +53,7 @@ public:
     void store(OrderBookSnapshot snapshot);
     [[nodiscard]] std::optional<OrderBookSnapshot> latest() const;
     [[nodiscard]] std::optional<OrderBookSnapshot> for_sequence(uint64_t sequence) const;
+    [[nodiscard]] std::optional<OrderBookSnapshot> at_or_after(uint64_t sequence) const;
     [[nodiscard]] const std::deque<OrderBookSnapshot>& all() const { return snapshots_; }
 private:
     size_t retention_count_;
@@ -61,10 +69,15 @@ public:
     void store_snapshot(OrderBookSnapshot snapshot);
     [[nodiscard]] std::optional<OrderBookSnapshot> get_latest_snapshot() const;
     [[nodiscard]] std::optional<OrderBookSnapshot> get_snapshot_for_sequence(uint64_t sequence) const;
+    // Recovery needs a checkpoint that already includes the missing range, so
+    // sequence tracking can safely advance beyond it.
+    [[nodiscard]] std::optional<OrderBookSnapshot> get_snapshot_at_or_after(uint64_t sequence) const;
+    [[nodiscard]] size_t snapshot_count() const;
     [[nodiscard]] bool verify_snapshots() const;
 private:
     SnapshotConfig config_;
     SnapshotHasher hasher_;
+    mutable std::mutex mutex_;
     SnapshotStore store_;
 };
 

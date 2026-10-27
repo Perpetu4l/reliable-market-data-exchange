@@ -21,11 +21,14 @@ it does **not** provide distributed consensus or replicated order books.
 - A separate-process `workload_client` that sends reproducible orders over
   real TCP sockets and reports client-measured acknowledgement RTT percentiles.
 - UDP multicast publishing of binary price-level, trade, and book-clear
-  events, with heartbeat processing. The protocol also defines snapshot message
-  types for the reliability layer.
+  events, with heartbeats. `--dual-feed` publishes the same bytes and sequence
+  numbers on independently configured Feed A and Feed B multicast endpoints.
 - UDP multicast receiver with message validation, sequence-gap statistics, and
   logging controls.
 - Lock-free SPSC market-data ring buffer.
+- A bounded publisher-side recovery history and a separate framed TCP recovery
+  endpoint. It uses the shared FCFS or Round-Robin scheduler and serves exact
+  retained binary datagrams; a request outside the window returns `TOO_OLD`.
 - C++ benchmarks and GoogleTest unit tests, including order-entry frame and
   queue-boundary checks.
 - Optional pybind11 bindings and PyQt6/pyqtgraph market simulator.
@@ -49,10 +52,21 @@ target named `reliability_demo`.
 - FCFS and Round Robin recovery scheduling in the deterministic demo, with
   per-subscriber service counters.
 
-The demonstration intentionally keeps recovery in one process so that loss,
+The demonstration intentionally keeps its own recovery in one process so that loss,
 seed, history, snapshot, and scheduling experiments are repeatable. The GUI
 runs this compiled demo and displays its emitted metrics; it is not labelled or
 presented as a live production multicast/recovery deployment.
+
+The normal `exchange` now exposes a separate live recovery TCP endpoint, and
+`reliable_subscriber` joins Feed A (and optionally Feed B), performs
+first-copy-wins sequencing, and requests retained gaps over that endpoint.
+Use `recovery_client` to verify a retained range or a checkpoint manually.
+When history is too old, the subscriber requests the first retained composite
+snapshot at or after the missing sequence, verifies its SHA-256 checkpoint
+hash, applies its absolute market-data levels, and resynchronises.
+Retained TCP replay replies larger than one bounded wire frame are sent as
+ordered recovery chunks and reassembled by the client; a single oversized
+market-data event is rejected explicitly rather than truncated.
 
 ## Prerequisites
 
@@ -210,8 +224,9 @@ feeds only help when their loss behaviour is not fully correlated.
 This intentionally disables retained event history and creates a checkpoint for
 each event. The output should contain `RECOVERY SNAPSHOT RESYNC` and report a
 successful snapshot recovery. The demo advances sequence continuity after a
-validated checkpoint; it does not yet rebuild a real order book from snapshot
-price levels.
+validated checkpoint. This deterministic harness intentionally models sequence
+resynchronisation only; the separate live subscriber applies absolute snapshot
+price levels to its local `BookBuilder`.
 
 ### 6. View all reliability-demo options
 
@@ -290,6 +305,172 @@ quit
 `order_client` waits for and prints the actual acknowledgement, rejection, or
 execution-report frame returned by the exchange. The exchange owns the shared
 order books; clients do not modify them directly.
+
+### Live dual-feed publishing and TCP recovery
+
+Start the exchange with two real multicast destinations and a bounded replay
+window. Feed A and Feed B carry the same original market-data datagrams.
+
+```sh
+./build-local/src/exchange --mode simulation --dual-feed \
+  --md-ip 239.1.1.1 --md-port 9999 \
+  --feed-b-ip 239.1.1.2 --feed-b-port 10000 \
+  --history 65536 --recovery-port 9090 \
+  --snapshot-interval 1000 --snapshot-retention 8 \
+  --recovery-policy round-robin \
+  --feed-a-loss 0.20 --feed-b-loss 0.20 --fault-seed 7
+```
+
+The recovery listener binds to all IPv4 interfaces on the configured port. In
+another terminal, request a range that has already been published:
+
+```sh
+./build-local/src/recovery_client \
+  --server 127.0.0.1 --port 9090 --subscriber demo-client --start 1 --end 5
+```
+
+`Recovery status: OK` followed by original sequence numbers proves the TCP
+request/response path and publisher-retained history. `TOO_OLD` is the correct
+result for a range evicted from `--history`; it is not a successful recovery.
+The client accepts numeric IPv4 addresses, so replace `127.0.0.1` with the
+server machine's reachable LAN address for a remote test. This project does
+not yet provide TLS/authentication, persistent checkpoints, or replay of
+events after a snapshot checkpoint.
+
+Request a retained checkpoint explicitly:
+
+```sh
+./build-local/src/recovery_client \
+  --server 127.0.0.1 --port 9090 --snapshot-min-sequence 1000
+```
+
+The result is `OK` only when a retained checkpoint at or after sequence 1000
+exists. A snapshot is built from published price-level state, not by reading
+or serialising the matching engine directly.
+
+`--recovery-policy fcfs|round-robin` selects the shared TCP recovery queue
+policy. On clean shutdown, the exchange prints real listener counters,
+scheduled requests, recovered messages, queue-wait average/max, and the number
+of subscriber identities served. These values are measured service counters,
+not synthetic dashboard data.
+
+For a controlled live fault run, `--feed-a-loss` and `--feed-b-loss` with the
+same `--fault-seed` deterministically withhold selected datagrams before their
+respective multicast `sendto` calls. `--correlated-loss` withholds a selected
+datagram from both feeds. These flags model **application-layer message
+withholding**, not packet loss imposed by the kernel, router, Wi-Fi, or network
+interface. Heartbeats are deliberately not withheld, so a subscriber can expose
+a missing tail sequence. The exchange prints per-feed withheld-datagram counts
+at shutdown.
+
+To exercise the full live subscriber path on a normal host, start this after
+the exchange:
+
+```sh
+./build-local/src/reliable_subscriber --dual-feed \
+  --feed-a-ip 239.1.1.1 --feed-a-port 9999 \
+  --feed-b-ip 239.1.1.2 --feed-b-port 10000 \
+  --interface 127.0.0.1 --recovery-server 127.0.0.1 --recovery-port 9090
+```
+
+It prints `DELIVERED`, `RECOVERY OK`, and a final count of duplicates, gaps,
+recovery requests, and failures. Its final `RELIABLE_SUBSCRIBER_RESULT` also
+reports `exchange_latest_sequence`, events received individually, events
+covered by a verified snapshot, and `permanently_lost`. A `completed` result
+therefore means the status-reported exchange sequence was fully accounted for;
+it does **not** mean every event necessarily arrived over UDP. This sandbox
+blocks socket binding, so this live path was compiled and its startup-error
+handling was checked here, but it must be run on a normal macOS/Linux host for
+multicast/TCP end-to-end proof.
+
+For a live run, `delivered_events_per_second` is the observed per-subscriber
+delivery rate over its measurement window. `recovery_p50_ns`,
+`recovery_p95_ns`, and `recovery_p99_ns` measure successful TCP repair from
+the recovery request to replay/snapshot application; they intentionally exclude
+the dual-feed grace wait. With more than one subscriber, the dashboard shows
+each saved record but does not pretend that independently calculated percentile
+summaries form one global percentile.
+
+`reliable_subscriber` waits `--gap-grace-ms 2` by default before requesting a
+gap. This lets Feed B supply the missing copy before recovery begins. It keeps
+monotonically scheduled ranges so repeated later packets do not re-request the
+same missing sequence. Use `--no-recovery` only as a negative control; it
+deliberately leaves detected gaps unresolved.
+
+For per-subscriber experiments, inject deterministic receive-side loss instead
+of publisher-side withholding:
+
+```sh
+./build-local/src/reliable_subscriber --dual-feed \
+  --loss-model independent --drop-a 0.20 --drop-b 0.20 --drop-seed 7 \
+  --interface 127.0.0.1 --recovery-server 127.0.0.1 --recovery-port 9090
+```
+
+`--loss-model correlated --corr-loss P` makes the same sequence disappear from
+both feeds for that subscriber. These controls are still application-layer
+receive-side withholding, not physical-network loss. An unresolved gap,
+snapshot validation failure, or recovery failure makes the subscriber exit
+non-zero and records `run_status=failed_integrity`. Receive-side injection is
+the recommended way to compare several subscribers because one subscriber's
+configured loss does not change another subscriber's feed.
+
+### One-command local live experiment
+
+The headless runner starts the real exchange and `reliable_subscriber` as
+separate local processes, waits for the recovery listener to announce readiness,
+then saves a JSON result with exact configuration, actual subscriber counters,
+and bounded process-log tails. Build first, then run:
+
+```sh
+python3 src/reliability_runner/live_reliability_runner.py \
+  --build-dir build-local --duration 15 --dual-feed --subscribers 4 \
+  --feed-a-loss 0.20 --feed-b-loss 0.20 --fault-seed 7 \
+  --snapshot-interval 10 --history 5 --recovery-policy round-robin
+```
+
+The command returns success only when the exchange recovery listener became
+ready and the subscriber parsed a real result containing delivered events. It
+saves both successful and failed runs under `results/live-reliability-*.json`.
+Successful runs include structured exchange-side feed-drop, retained-snapshot,
+recovery-service, and scheduler queue counters, plus subscriber delivery and
+recovery counters; the GUI reads these saved values rather than inventing them.
+For a fair baseline comparison, repeat with the same duration, seed, history,
+snapshot settings, and policy but set both feed loss rates to `0`. The runner
+has been checked here through its real failure path; sandbox policy prevents it
+from opening the TCP listener, so successful socket execution still needs a
+normal host.
+
+`--subscribers N` starts N separate `reliable_subscriber` processes against
+the same exchange (1--16). Each receive-side fault stream uses a distinct seed
+derived from `--fault-seed`; Feed A/B correlation remains within a subscriber.
+The saved JSON preserves each subscriber's own result and log tail, so failed
+subscribers cannot disappear inside an aggregate result.
+
+For recovery-fairness comparisons, hold subscriber count, duration, fault
+seed, history, and snapshot settings fixed, then repeat with
+`--recovery-policy fcfs` and `--recovery-policy round-robin`. The exchange
+result records queue-wait average/max, a deterministic per-subscriber service
+distribution, and Jain's **scheduler-service** fairness index (scaled to
+parts-per-million). These describe requests that reached the shared recovery
+worker—not end-to-end network delivery fairness.
+
+The Reliability Dashboard's **Live subscribers** control maps directly to
+`--subscribers`. One means one exchange and one `reliable_subscriber` process;
+larger values start independent subscribers against that same exchange. The
+dashboard aggregates count fields across them, while rate and latency
+percentiles remain per-subscriber to avoid mathematically invalid summaries.
+
+On a normal host, run the live baseline check after building the two targets:
+
+```sh
+python3 tests/live_reliability_e2e.py --build-dir build-local
+```
+
+It starts the same real exchange/subscriber process pair used by the runner,
+requires a reconciled `completed` subscriber result, and deletes its temporary
+result file. It exits `77` only when the OS explicitly refuses socket binding;
+that is a skip, not a passing networking test. Any other non-zero exit is a
+real integration failure to inspect.
 
 ### Automatic local TCP workload
 
@@ -384,12 +565,23 @@ The GUI has three clear views:
   shows the actual structured output: loss, duplicate suppression, gaps,
   replay recovery, feed drops, checkpoint hash, and latency percentiles. Each
   run writes `results/reliability-*.csv`; its output is also kept in the
-  dashboard log.
+  dashboard log. **Run live local experiment** is separate: it starts the
+  actual exchange and `reliable_subscriber` through the provenance-preserving
+  runner, then displays only counters saved by that live run. Fields not
+  collected by the live path explicitly say unavailable rather than borrowing
+  deterministic-demo values.
 
 For a quick visible demo, open **Reliability Experiments → Configure & Run**,
 choose **Dual feed - independent loss**, set packet loss to `0.20`, leave the
 seed as `42`, then press **Run reliability experiment**. The dashboard changes
 to **Results** automatically when the run completes.
+
+For the real local path, use the same settings but press **Run live local
+experiment**, choose a duration, and run on a normal host that allows local
+TCP/multicast sockets. The saved `results/live-reliability-*.json` identifies
+whether the listener became ready, the exact configuration, observed subscriber
+counters, and bounded log tails. A failed live run is shown as failed; it is
+never rendered as an experiment result.
 
 ### GUI workflows and what they prove
 

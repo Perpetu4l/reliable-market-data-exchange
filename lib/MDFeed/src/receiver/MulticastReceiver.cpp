@@ -33,6 +33,14 @@ public:
             close();
             return false;
         }
+#ifdef SO_REUSEPORT
+        // macOS requires this in addition to SO_REUSEADDR when several local
+        // subscriber processes join the same multicast port.
+        if (setsockopt(socket_fd_, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse)) < 0) {
+            close();
+            return false;
+        }
+#endif
 
         int recv_buffer_size = static_cast<int>(buffer_size);
         setsockopt(socket_fd_, SOL_SOCKET, SO_RCVBUF, &recv_buffer_size, sizeof(recv_buffer_size));
@@ -157,16 +165,19 @@ void MulticastReceiver::stop()
 
     running_.store(false);
 
+    // recv() is blocking. Closing before joining wakes the receiver thread;
+    // the former order could hang shutdown indefinitely while no datagrams
+    // were arriving.
+    if (socket_) {
+        socket_->close();
+    }
+
     if (receiver_thread_.joinable()) {
         receiver_thread_.join();
     }
 
     if (stats_thread_.joinable()) {
         stats_thread_.join();
-    }
-
-    if (socket_) {
-        socket_->close();
     }
 
     if (log_file_) {

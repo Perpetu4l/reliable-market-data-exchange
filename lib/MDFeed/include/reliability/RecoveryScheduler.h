@@ -3,6 +3,7 @@
 #include "reliability/RecoveryProtocol.h"
 
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <optional>
@@ -21,6 +22,8 @@ struct ScheduledRecovery {
 struct RecoverySchedulerMetrics {
     uint64_t recovery_request_count{0};
     uint64_t messages_recovered{0};
+    uint64_t total_queue_wait_ns{0};
+    uint64_t max_queue_wait_ns{0};
     std::unordered_map<std::string, uint64_t> per_subscriber_service_distribution;
 };
 
@@ -30,7 +33,8 @@ public:
     explicit RecoveryScheduler(SchedulingPolicy policy = SchedulingPolicy::FCFS);
     void enqueue(RecoveryRequest request);
     [[nodiscard]] std::optional<ScheduledRecovery> next();
-    void record_completed(const ScheduledRecovery& recovery, uint64_t messages_recovered);
+    void record_completed(const ScheduledRecovery& recovery, uint64_t messages_recovered,
+        uint64_t queue_wait_ns = 0);
     [[nodiscard]] const RecoverySchedulerMetrics& metrics() const { return metrics_; }
 private:
     SchedulingPolicy policy_;
@@ -38,6 +42,29 @@ private:
     std::unordered_map<std::string, std::deque<ScheduledRecovery>> per_subscriber_;
     std::deque<std::string> round_robin_order_;
     RecoverySchedulerMetrics metrics_;
+};
+
+// Blocking ownership wrapper for a live recovery acceptor/worker setup. The
+// policy implementation remains independently testable above; this wrapper
+// supplies synchronisation and shutdown semantics without making the policy
+// class itself depend on sockets or threads.
+class BlockingRecoveryScheduler {
+public:
+    explicit BlockingRecoveryScheduler(SchedulingPolicy policy = SchedulingPolicy::FCFS);
+    void enqueue(RecoveryRequest request);
+    [[nodiscard]] std::optional<ScheduledRecovery> wait_next();
+    void stop();
+    [[nodiscard]] size_t pending_count() const;
+    void record_completed(const ScheduledRecovery& recovery, uint64_t messages_recovered,
+        uint64_t queue_wait_ns = 0);
+    [[nodiscard]] RecoverySchedulerMetrics metrics() const;
+
+private:
+    mutable std::mutex mutex_;
+    std::condition_variable ready_;
+    RecoveryScheduler scheduler_;
+    bool stopping_{false};
+    size_t pending_count_{0};
 };
 
 } // namespace mdfeed::reliability

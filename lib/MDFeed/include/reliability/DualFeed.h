@@ -6,6 +6,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 
 namespace mdfeed::reliability {
 
@@ -77,11 +78,13 @@ public:
 
     explicit DualFeedSubscriber(EventHandler event_handler = {}, GapHandler gap_handler = {});
     void on_packet(FeedId feed_id, MarketDataEvent packet);
+    void on_heartbeat(uint64_t last_published_sequence);
     // Recovery responses enter through the same ordering path as feed events.
     void on_recovered_event(MarketDataEvent event);
     // Call after a validated snapshot has been applied to the local book state.
     void resynchronise_after_snapshot(uint64_t checkpoint_sequence);
     [[nodiscard]] const SequenceTracker& sequence_tracker() const { return sequence_tracker_; }
+    [[nodiscard]] uint64_t expected_sequence() const;
     [[nodiscard]] size_t pending_event_count() const { return pending_events_.size(); }
 
 private:
@@ -89,6 +92,10 @@ private:
     void drain_pending_events();
 
     SequenceTracker sequence_tracker_;
+    // Feed A and Feed B callbacks may run on separate UDP receiver threads.
+    // A recursive mutex also permits the synchronous recovery callback to
+    // inject recovered events through the normal ordering path.
+    mutable std::recursive_mutex mutex_;
     EventHandler event_handler_;
     GapHandler gap_handler_;
     std::map<uint64_t, MarketDataEvent> pending_events_;

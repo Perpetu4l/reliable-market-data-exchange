@@ -42,8 +42,15 @@ void DualFeedPublisher::publish(const MarketDataEvent& event) const
 DualFeedSubscriber::DualFeedSubscriber(EventHandler event_handler, GapHandler gap_handler)
     : event_handler_(std::move(event_handler)), gap_handler_(std::move(gap_handler)) {}
 
+uint64_t DualFeedSubscriber::expected_sequence() const
+{
+    std::lock_guard lock(mutex_);
+    return sequence_tracker_.expected_sequence();
+}
+
 void DualFeedSubscriber::on_packet(const FeedId feed_id, MarketDataEvent packet)
 {
+    std::lock_guard lock(mutex_);
     packet.feed_id = feed_id;
     const auto result = sequence_tracker_.on_event(packet);
     if (result.disposition == SequenceDisposition::DUPLICATE) return; // first-copy-wins
@@ -59,8 +66,19 @@ void DualFeedSubscriber::on_packet(const FeedId feed_id, MarketDataEvent packet)
     if (result.missing_range && gap_handler_) gap_handler_(*result.missing_range);
 }
 
+void DualFeedSubscriber::on_heartbeat(const uint64_t last_published_sequence)
+{
+    std::lock_guard lock(mutex_);
+    const auto result = sequence_tracker_.on_heartbeat(last_published_sequence);
+    if (result.disposition == SequenceDisposition::GAP_DETECTED
+        && result.missing_range && gap_handler_) {
+        gap_handler_(*result.missing_range);
+    }
+}
+
 void DualFeedSubscriber::on_recovered_event(MarketDataEvent event)
 {
+    std::lock_guard lock(mutex_);
     const auto result = sequence_tracker_.on_event(event);
     if (result.disposition != SequenceDisposition::ACCEPTED) return;
     accept_and_deliver(event);
@@ -69,6 +87,7 @@ void DualFeedSubscriber::on_recovered_event(MarketDataEvent event)
 
 void DualFeedSubscriber::resynchronise_after_snapshot(const uint64_t checkpoint_sequence)
 {
+    std::lock_guard lock(mutex_);
     // The caller is responsible for applying and verifying the book snapshot.
     // This class only restores sequence continuity and retains later packets.
     for (auto it = pending_events_.begin(); it != pending_events_.end();) {
