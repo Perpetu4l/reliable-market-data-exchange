@@ -370,11 +370,14 @@ the exchange:
 ```
 
 It prints `DELIVERED`, `RECOVERY OK`, and a final count of duplicates, gaps,
-recovery requests, and failures. The subscriber does not inject loss itself;
-use an operating-system/network test mechanism or a purpose-built publisher
-fault stage when testing loss. This sandbox blocks socket binding, so this
-live path was compiled and its startup-error handling was checked here, but it
-must be run on a normal macOS/Linux host for multicast/TCP end-to-end proof.
+recovery requests, and failures. Its final `RELIABLE_SUBSCRIBER_RESULT` also
+reports `exchange_latest_sequence`, events received individually, events
+covered by a verified snapshot, and `permanently_lost`. A `completed` result
+therefore means the status-reported exchange sequence was fully accounted for;
+it does **not** mean every event necessarily arrived over UDP. This sandbox
+blocks socket binding, so this live path was compiled and its startup-error
+handling was checked here, but it must be run on a normal macOS/Linux host for
+multicast/TCP end-to-end proof.
 
 `reliable_subscriber` waits `--gap-grace-ms 2` by default before requesting a
 gap. This lets Feed B supply the missing copy before recovery begins. It keeps
@@ -395,7 +398,9 @@ of publisher-side withholding:
 both feeds for that subscriber. These controls are still application-layer
 receive-side withholding, not physical-network loss. An unresolved gap,
 snapshot validation failure, or recovery failure makes the subscriber exit
-non-zero and records `run_status=failed_integrity`.
+non-zero and records `run_status=failed_integrity`. Receive-side injection is
+the recommended way to compare several subscribers because one subscriber's
+configured loss does not change another subscriber's feed.
 
 ### One-command local live experiment
 
@@ -428,6 +433,18 @@ the same exchange (1--16). Each receive-side fault stream uses a distinct seed
 derived from `--fault-seed`; Feed A/B correlation remains within a subscriber.
 The saved JSON preserves each subscriber's own result and log tail, so failed
 subscribers cannot disappear inside an aggregate result.
+
+On a normal host, run the live baseline check after building the two targets:
+
+```sh
+python3 tests/live_reliability_e2e.py --build-dir build-local
+```
+
+It starts the same real exchange/subscriber process pair used by the runner,
+requires a reconciled `completed` subscriber result, and deletes its temporary
+result file. It exits `77` only when the OS explicitly refuses socket binding;
+that is a skip, not a passing networking test. Any other non-zero exit is a
+real integration failure to inspect.
 
 ### Automatic local TCP workload
 

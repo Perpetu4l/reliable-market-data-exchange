@@ -132,6 +132,9 @@ int main(const int argc, char* argv[])
     std::atomic<uint64_t> recovered_events{0};
     std::atomic<uint64_t> recovery_failures{0};
     std::atomic<uint64_t> snapshot_recoveries{0};
+    // Snapshot coverage is reported separately from individually delivered
+    // events, so a run does not claim that it received every event over UDP.
+    std::atomic<uint64_t> events_covered_by_snapshot{0};
     std::atomic<uint64_t> datagrams_received_a{0};
     std::atomic<uint64_t> datagrams_received_b{0};
     std::atomic<uint64_t> dropped_by_injector_a{0};
@@ -139,9 +142,11 @@ int main(const int argc, char* argv[])
     std::mutex local_book_mutex;
     std::mutex recovery_mutex;
     std::condition_variable recovery_ready;
+    std::condition_variable recovery_idle;
     std::deque<MissingRange> recovery_queue;
     uint64_t recovery_scheduled_through{0};
     std::atomic<bool> recovery_worker_running{true};
+    uint64_t recovery_tasks_in_flight{0}; // protected by recovery_mutex
     BookBuilder local_book;
     SnapshotHasher snapshot_hasher;
     FaultInjector receive_fault_a({config.drop_a, 0.0, 0.0, {}, config.drop_seed});
@@ -168,18 +173,29 @@ int main(const int argc, char* argv[])
         });
 
     std::thread recovery_worker([&] {
-        while (recovery_worker_running.load()) {
+        while (true) {
             MissingRange range;
             {
                 std::unique_lock lock(recovery_mutex);
                 recovery_ready.wait(lock, [&] { return !recovery_worker_running.load() || !recovery_queue.empty(); });
-                if (!recovery_worker_running.load() && recovery_queue.empty()) return;
+                if (!recovery_worker_running.load() && recovery_queue.empty()) break;
                 range = recovery_queue.front();
                 recovery_queue.pop_front();
+                ++recovery_tasks_in_flight;
             }
+            const auto finish_task = [&] {
+                std::lock_guard lock(recovery_mutex);
+                --recovery_tasks_in_flight;
+                if (recovery_queue.empty() && recovery_tasks_in_flight == 0) recovery_idle.notify_all();
+            };
+
             std::this_thread::sleep_for(std::chrono::milliseconds(config.gap_grace_ms));
             range.start_sequence = std::max(range.start_sequence, subscriber->expected_sequence());
-            if (!range.valid()) continue; // Feed B filled the range during grace.
+            if (!range.valid()) {
+                finish_task(); // Feed B filled the range during grace.
+                continue;
+            }
+
             ++recovery_requests;
             RecoveryTcpClient client(config.recovery);
             std::string error;
@@ -189,37 +205,38 @@ int main(const int argc, char* argv[])
                           << range.end_sequence << " events=" << response->events.size() << '\n';
                 for (auto event : response->events) subscriber->on_recovered_event(std::move(event));
                 recovered_events += response->events.size();
-                continue;
-            }
-            if (response && response->status == RecoveryStatus::TOO_OLD) {
+            } else if (response && response->status == RecoveryStatus::TOO_OLD) {
                 const auto snapshot_response = client.request_snapshot(range.end_sequence, error);
                 if (snapshot_response && snapshot_response->status == RecoveryStatus::OK
-                    && snapshot_response->snapshot && snapshot_hasher.verify(*snapshot_response->snapshot)) {
+                    && snapshot_response->snapshot
+                    && snapshot_response->snapshot->sequence_number >= range.end_sequence
+                    && snapshot_hasher.verify(*snapshot_response->snapshot)) {
+                    const auto covered_from = subscriber->expected_sequence();
                     {
                         std::lock_guard lock(local_book_mutex);
                         local_book.apply_snapshot(*snapshot_response->snapshot);
                     }
-                    subscriber->resynchronise_after_snapshot(
-                        snapshot_response->snapshot->sequence_number);
+                    subscriber->resynchronise_after_snapshot(snapshot_response->snapshot->sequence_number);
+                    if (snapshot_response->snapshot->sequence_number >= covered_from) {
+                        events_covered_by_snapshot += snapshot_response->snapshot->sequence_number - covered_from + 1;
+                    }
                     ++snapshot_recoveries;
                     std::cout << "SNAPSHOT RECOVERY OK checkpoint="
                               << snapshot_response->snapshot->sequence_number << " hash="
                               << snapshot_response->snapshot->hash << '\n';
-                    continue;
+                } else {
+                    ++recovery_failures;
+                    std::cerr << "SNAPSHOT RECOVERY FAILED range=" << range.start_sequence << '-'
+                              << range.end_sequence << ": "
+                              << (!snapshot_response ? error : snapshot_response->detail) << '\n';
                 }
-                ++recovery_failures;
-                std::cerr << "SNAPSHOT RECOVERY FAILED range=" << range.start_sequence << '-'
-                          << range.end_sequence << ": "
-                          << (!snapshot_response ? error : snapshot_response->detail) << '\n';
-                continue;
-            }
-            {
+            } else {
                 ++recovery_failures;
                 std::cerr << "RECOVERY FAILED range=" << range.start_sequence << '-'
                           << range.end_sequence << ": "
                           << (!response ? error : response->detail) << '\n';
-                continue;
             }
+            finish_task();
         }
     });
 
@@ -273,13 +290,16 @@ int main(const int argc, char* argv[])
     }
     // Final reconciliation closes the tail-loss hole even if the final UDP
     // heartbeat was not observed before the duration elapsed.
+    uint64_t exchange_latest_sequence = 0;
+    bool status_reconciled = config.no_recovery;
     if (!config.no_recovery) {
         RecoveryTcpClient client(config.recovery);
         std::string status_error;
         const auto status = client.request_status(status_error);
         if (status) {
+            exchange_latest_sequence = status->latest_sequence;
             subscriber->on_heartbeat(status->latest_sequence);
-            std::this_thread::sleep_for(std::chrono::milliseconds(config.gap_grace_ms + 10));
+            status_reconciled = true;
         } else {
             ++recovery_failures;
             std::cerr << "STATUS RECONCILIATION FAILED: " << status_error << '\n';
@@ -287,16 +307,35 @@ int main(const int argc, char* argv[])
     }
     receiver_a.stop();
     if (receiver_b) receiver_b->stop();
+    // A result is emitted only after queued repair work has settled.  This
+    // makes a timeout visible instead of silently dropping the final range.
+    {
+        std::unique_lock lock(recovery_mutex);
+        if (!recovery_idle.wait_for(lock, std::chrono::seconds(10), [&] {
+                return recovery_queue.empty() && recovery_tasks_in_flight == 0;
+            })) {
+            ++recovery_failures;
+            std::cerr << "RECOVERY DRAIN FAILED: queued recovery did not finish within 10 seconds\n";
+        }
+    }
     recovery_worker_running.store(false);
     recovery_ready.notify_all();
     recovery_worker.join();
-    const bool unresolved_gap = subscriber->pending_event_count() != 0
+    const auto accounted_events = delivered.load() + events_covered_by_snapshot.load();
+    const auto permanently_lost = exchange_latest_sequence > accounted_events
+        ? exchange_latest_sequence - accounted_events : 0;
+    const bool unresolved_gap = !status_reconciled
+        || subscriber->pending_event_count() != 0
         || (config.no_recovery && subscriber->sequence_tracker().gap_count() != 0)
-        || recovery_failures.load() != 0;
+        || recovery_failures.load() != 0
+        || (!config.no_recovery && permanently_lost != 0);
     std::cout << "SUMMARY delivered=" << delivered << " duplicates="
               << subscriber->sequence_tracker().duplicate_count() << " gaps="
               << subscriber->sequence_tracker().gap_count() << " recovery_requests="
               << recovery_requests << " snapshot_recoveries=" << snapshot_recoveries
+              << " snapshot_covered=" << events_covered_by_snapshot
+              << " exchange_latest=" << exchange_latest_sequence
+              << " permanently_lost=" << permanently_lost
               << " recovery_failures=" << recovery_failures << '\n';
     std::cout << "RELIABLE_SUBSCRIBER_RESULT delivered=" << delivered
               << " duplicates=" << subscriber->sequence_tracker().duplicate_count()
@@ -304,6 +343,9 @@ int main(const int argc, char* argv[])
               << " recovery_requests=" << recovery_requests
               << " recovered_events=" << recovered_events
               << " snapshot_recoveries=" << snapshot_recoveries
+              << " events_covered_by_snapshot=" << events_covered_by_snapshot
+              << " exchange_latest_sequence=" << exchange_latest_sequence
+              << " permanently_lost=" << permanently_lost
               << " recovery_failures=" << recovery_failures
               << " gap_grace_ms=" << config.gap_grace_ms
               << " datagrams_received_a=" << datagrams_received_a

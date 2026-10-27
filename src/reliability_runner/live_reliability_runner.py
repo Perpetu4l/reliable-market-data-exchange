@@ -199,9 +199,17 @@ def main() -> int:
     parsed_by_id = {subscriber_id: parse_fields(lines, RESULT_RE)
                     for subscriber_id, lines in subscriber_lines_by_id.items()}
     exchange_metrics = parse_fields(exchange_lines, EXCHANGE_RESULT_RE)
-    success = all(subscriber_exits[subscriber_id] == 0 and metrics is not None
-                  and int(metrics.get("delivered", "0")) > 0
-                  for subscriber_id, metrics in parsed_by_id.items())
+    # A parsed line alone is not proof of a valid experiment.  The subscriber
+    # performs final status reconciliation and reports whether the exchange
+    # sequence was fully accounted for; preserve that boundary in saved runs.
+    success = all(
+        subscriber_exits[subscriber_id] == 0
+        and metrics is not None
+        and metrics.get("run_status") == "completed"
+        and metrics.get("permanently_lost", "0") == "0"
+        and int(metrics.get("delivered", "0")) > 0
+        for subscriber_id, metrics in parsed_by_id.items()
+    )
     outcome = {
         "schema": "reliable-market-data-live-run/v1",
         "started_at_utc": started_at.isoformat(),

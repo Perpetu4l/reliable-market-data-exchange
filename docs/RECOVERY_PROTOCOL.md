@@ -108,7 +108,11 @@ this fairness queue and are handled by the connection handler.
 a timed subscriber run, `reliable_subscriber` requests this status and feeds
 `latest_sequence` through its heartbeat gap detector before shutdown. A status
 failure is reported as `failed_integrity`, rather than silently accepting a
-possibly lost stream tail.
+possibly lost stream tail. The subscriber then drains already queued recovery
+work before emitting its result. It reports individual deliveries separately
+from the contiguous range covered by any verified snapshot and calculates
+`permanently_lost` against `latest_sequence`; a non-zero value is an integrity
+failure, not a successful experiment result.
 
 ## Controlled live loss experiments
 

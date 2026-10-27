@@ -181,7 +181,8 @@ class ReliabilityDashboard(QTabWidget):
             # process. Aggregate count fields only; it does not fabricate
             # latency or a synthetic per-subscriber state.
             fields = ("delivered", "duplicates", "gaps", "recovery_requests", "recovered_events",
-                      "snapshot_recoveries", "recovery_failures")
+                      "snapshot_recoveries", "events_covered_by_snapshot", "permanently_lost",
+                      "recovery_failures")
             metrics = {field: str(sum(int(record.get(field, "0")) for record in raw_metrics.values()))
                        for field in fields}
         else:
@@ -202,7 +203,8 @@ class ReliabilityDashboard(QTabWidget):
         self.redundancy.feed_b.setText(f"{exchange_value('feed_b_app_dropped')} application drop(s)")
         self.redundancy.avoided_gaps.setText("Not derived by live subscriber")
         self.snapshot.status.setText(
-            f"{exchange_value('snapshots_retained')} retained; {value('snapshot_recoveries')} applied")
+            f"{exchange_value('snapshots_retained')} retained; {value('snapshot_recoveries')} applied; "
+            f"{value('events_covered_by_snapshot')} event(s) covered")
         self.integrity.latest_hash.setText("See subscriber/event log")
         self.integrity.chain_status.setText("Verified per applied checkpoint" if int(value("snapshot_recoveries")) else "No snapshot applied")
         self.fairness.waiting_time.setText(
@@ -212,13 +214,17 @@ class ReliabilityDashboard(QTabWidget):
             f"{exchange_value('recovery_subscribers')} subscriber(s), "
             f"{exchange_value('recovery_messages')} recovered event(s)")
         self.delivery_chart.clear()
-        self._bars(self.delivery_chart, ["Delivered", "Duplicates", "Gaps", "Replayed"],
-                   [float(value("delivered")), float(value("duplicates")), float(value("gaps")),
-                    float(value("recovered_events"))], "#2677c9")
+        self._bars(self.delivery_chart,
+                   ["Delivered", "Snapshot\ncovered", "Duplicates", "Gaps", "Replayed", "Unresolved"],
+                   [float(value("delivered")), float(value("events_covered_by_snapshot")),
+                    float(value("duplicates")), float(value("gaps")),
+                    float(value("recovered_events")), float(value("permanently_lost"))], "#2677c9")
         self.latency_chart.clear()
         self.summary.setText(
-            "Live run completed." if success else
-            "Live run failed before recording delivered events; inspect the persisted result and log below.")
+            "Live run completed: the exchange sequence was fully accounted for."
+            if success else
+            f"Live run failed integrity validation: {value('permanently_lost')} unaccounted event(s), "
+            f"{value('recovery_failures')} recovery failure(s). Inspect the persisted result and log below.")
         self.setCurrentIndex(0)
 
     def _append_log(self, line: str) -> None:
