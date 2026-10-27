@@ -55,7 +55,7 @@ std::optional<RecoveryWireFrame> RecoveryWireCodec::take_frame(std::vector<uint8
     if (stream.size() < 4 + size) return std::nullopt;
     const auto raw_type = stream[4];
     if (raw_type < static_cast<uint8_t>(RecoveryWireType::RECOVERY_REQUEST)
-        || raw_type > static_cast<uint8_t>(RecoveryWireType::STATUS_RESPONSE)) {
+        || raw_type > static_cast<uint8_t>(RecoveryWireType::RECOVERY_COMPLETE)) {
         error = "unknown recovery frame type"; stream.erase(stream.begin(), stream.begin() + 4 + size); return std::nullopt;
     }
     RecoveryWireFrame frame{static_cast<RecoveryWireType>(raw_type), {stream.begin() + 5, stream.begin() + 4 + size}};

@@ -256,16 +256,68 @@ void RecoveryTcpServer::worker_loop()
         }
         auto response = recovery_service_->request_missing_data(scheduled->request);
         auto payload = RecoveryWireCodec::encode_response(response);
-        if (payload.size() + 1 > RecoveryWireCodec::MAX_FRAME_BYTES) {
+        std::vector<std::vector<uint8_t>> frames;
+        if (payload.size() + 1 <= RecoveryWireCodec::MAX_FRAME_BYTES) {
+            frames.push_back(RecoveryWireCodec::frame(RecoveryWireType::RECOVERY_RESPONSE, payload));
+        } else if (response.status == RecoveryStatus::OK && !response.events.empty()) {
+            // Preserve the one-megabyte framing bound without silently
+            // truncating an otherwise retained range. Chunks carry ordinary
+            // recovery-response payloads; the empty COMPLETE frame defines
+            // the end of this logical response.
+            std::vector<MarketDataEvent> chunk;
+            bool event_too_large = false;
+            for (const auto& event : response.events) {
+                auto candidate = chunk;
+                candidate.push_back(event);
+                const auto candidate_payload = RecoveryWireCodec::encode_response(
+                    {RecoveryStatus::OK, std::move(candidate), std::nullopt, {}});
+                if (candidate_payload.size() + 1 <= RecoveryWireCodec::MAX_FRAME_BYTES) {
+                    chunk.push_back(event);
+                    continue;
+                }
+                if (chunk.empty()) {
+                    event_too_large = true;
+                    break;
+                }
+                frames.push_back(RecoveryWireCodec::frame(RecoveryWireType::RECOVERY_CHUNK,
+                    RecoveryWireCodec::encode_response({RecoveryStatus::OK, std::move(chunk), std::nullopt, {}})));
+                const auto single_event_payload = RecoveryWireCodec::encode_response(
+                    {RecoveryStatus::OK, {event}, std::nullopt, {}});
+                if (single_event_payload.size() + 1 > RecoveryWireCodec::MAX_FRAME_BYTES) {
+                    event_too_large = true;
+                    break;
+                }
+                chunk = {event};
+            }
+            if (!event_too_large && !chunk.empty()) {
+                frames.push_back(RecoveryWireCodec::frame(RecoveryWireType::RECOVERY_CHUNK,
+                    RecoveryWireCodec::encode_response({RecoveryStatus::OK, std::move(chunk), std::nullopt, {}})));
+            }
+            if (!event_too_large) {
+                frames.push_back(RecoveryWireCodec::frame(RecoveryWireType::RECOVERY_COMPLETE, {}));
+            } else {
+                frames.clear();
+                response = {RecoveryStatus::ERROR, {}, std::nullopt,
+                    "one recovery event exceeds the maximum frame size"};
+                frames.push_back(RecoveryWireCodec::frame(RecoveryWireType::RECOVERY_RESPONSE,
+                    RecoveryWireCodec::encode_response(response)));
+            }
+        } else {
             response = {RecoveryStatus::ERROR, {}, std::nullopt,
                 "recovery response exceeds the maximum frame size"};
-            payload = RecoveryWireCodec::encode_response(response);
+            frames.push_back(RecoveryWireCodec::frame(RecoveryWireType::RECOVERY_RESPONSE,
+                RecoveryWireCodec::encode_response(response)));
         }
-        const auto bytes = RecoveryWireCodec::frame(RecoveryWireType::RECOVERY_RESPONSE, payload);
         bool sent = false;
         {
             std::lock_guard write_lock(pending.connection->write_mutex);
-            if (pending.connection->open.load()) sent = send_all(pending.connection->fd, bytes);
+            sent = pending.connection->open.load();
+            for (const auto& frame : frames) {
+                if (!sent || !send_all(pending.connection->fd, frame)) {
+                    sent = false;
+                    break;
+                }
+            }
         }
         const auto queue_wait_ns = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - scheduled->enqueued_at).count());
@@ -319,29 +371,53 @@ std::optional<RecoveryResponse> RecoveryTcpClient::request_missing_data(
         return std::nullopt;
     }
     std::vector<uint8_t> stream;
+    std::vector<MarketDataEvent> chunked_events;
+    bool receiving_chunks = false;
     uint8_t buffer[4096];
     while (true) {
-        const auto received = recv(fd, buffer, sizeof(buffer), 0);
-        if (received <= 0) {
-            error = std::string("recovery response was not received: ") + std::strerror(errno);
-            close_socket(fd);
-            return std::nullopt;
-        }
-        stream.insert(stream.end(), buffer, buffer + received);
         const auto frame = RecoveryWireCodec::take_frame(stream, error);
         if (!error.empty()) {
             close_socket(fd);
             return std::nullopt;
         }
-        if (!frame) continue;
-        if (frame->type != RecoveryWireType::RECOVERY_RESPONSE) {
-            error = "unexpected recovery response frame";
-            close_socket(fd);
-            return std::nullopt;
+        if (!frame) {
+            const auto received = recv(fd, buffer, sizeof(buffer), 0);
+            if (received <= 0) {
+                error = std::string("recovery response was not received: ") + std::strerror(errno);
+                close_socket(fd);
+                return std::nullopt;
+            }
+            stream.insert(stream.end(), buffer, buffer + received);
+            continue;
         }
-        const auto response = RecoveryWireCodec::decode_response(frame->payload, error);
+        if (frame->type == RecoveryWireType::RECOVERY_RESPONSE) {
+            if (receiving_chunks) {
+                error = "received a single recovery response after recovery chunks";
+                close_socket(fd);
+                return std::nullopt;
+            }
+            const auto response = RecoveryWireCodec::decode_response(frame->payload, error);
+            close_socket(fd);
+            return response;
+        }
+        if (frame->type == RecoveryWireType::RECOVERY_CHUNK) {
+            const auto chunk = RecoveryWireCodec::decode_response(frame->payload, error);
+            if (!chunk || chunk->status != RecoveryStatus::OK || !chunk->detail.empty()) {
+                if (error.empty()) error = "invalid recovery chunk";
+                close_socket(fd);
+                return std::nullopt;
+            }
+            receiving_chunks = true;
+            chunked_events.insert(chunked_events.end(), chunk->events.begin(), chunk->events.end());
+            continue;
+        }
+        if (frame->type == RecoveryWireType::RECOVERY_COMPLETE && receiving_chunks && frame->payload.empty()) {
+            close_socket(fd);
+            return RecoveryResponse{RecoveryStatus::OK, std::move(chunked_events), std::nullopt, {}};
+        }
+        error = "unexpected recovery response frame";
         close_socket(fd);
-        return response;
+        return std::nullopt;
     }
 }
 

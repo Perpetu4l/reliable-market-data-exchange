@@ -15,10 +15,11 @@
 
 namespace mdfeed::reliability {
 
-// A deliberately small TCP transport around RecoveryServer. It uses the
-// bounded RecoveryWire framing and one shared scheduler worker, so FCFS and
-// round-robin policies apply across connected subscribers. Authentication,
-// TLS and snapshot transfer are separate future work.
+// A deliberately small TCP transport around RecoveryServer. It uses bounded
+// RecoveryWire framing (including chunked retained-event replies) and one
+// shared scheduler worker, so FCFS and round-robin policies apply across
+// connected subscribers. Authentication, TLS and persistent snapshots remain
+// future work.
 class RecoveryTcpServer {
 public:
     struct Config {

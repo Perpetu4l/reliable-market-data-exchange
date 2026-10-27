@@ -64,6 +64,9 @@ Use `recovery_client` to verify a retained range or a checkpoint manually.
 When history is too old, the subscriber requests the first retained composite
 snapshot at or after the missing sequence, verifies its SHA-256 checkpoint
 hash, applies its absolute market-data levels, and resynchronises.
+Retained TCP replay replies larger than one bounded wire frame are sent as
+ordered recovery chunks and reassembled by the client; a single oversized
+market-data event is rejected explicitly rather than truncated.
 
 ## Prerequisites
 
@@ -441,6 +444,14 @@ the same exchange (1--16). Each receive-side fault stream uses a distinct seed
 derived from `--fault-seed`; Feed A/B correlation remains within a subscriber.
 The saved JSON preserves each subscriber's own result and log tail, so failed
 subscribers cannot disappear inside an aggregate result.
+
+For recovery-fairness comparisons, hold subscriber count, duration, fault
+seed, history, and snapshot settings fixed, then repeat with
+`--recovery-policy fcfs` and `--recovery-policy round-robin`. The exchange
+result records queue-wait average/max, a deterministic per-subscriber service
+distribution, and Jain's **scheduler-service** fairness index (scaled to
+parts-per-million). These describe requests that reached the shared recovery
+worker—not end-to-end network delivery fairness.
 
 The Reliability Dashboard's **Live subscribers** control maps directly to
 `--subscribers`. One means one exchange and one `reliable_subscriber` process;

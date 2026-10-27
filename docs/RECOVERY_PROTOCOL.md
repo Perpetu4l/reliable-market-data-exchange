@@ -26,8 +26,10 @@ memory.
 | `RECOVERY_RESPONSE` | 2 | Implemented for retained-event replies |
 | `SNAPSHOT_REQUEST` | 3 | Implemented |
 | `SNAPSHOT_RESPONSE` | 4 | Implemented for in-memory checkpoints |
-| `STATUS_REQUEST` | 5 | Reserved |
-| `STATUS_RESPONSE` | 6 | Reserved |
+| `STATUS_REQUEST` | 5 | Implemented |
+| `STATUS_RESPONSE` | 6 | Implemented |
+| `RECOVERY_CHUNK` | 7 | Implemented when an OK replay exceeds one bounded frame |
+| `RECOVERY_COMPLETE` | 8 | Implemented terminator for a chunked replay |
 
 ## Recovery request
 
@@ -55,8 +57,11 @@ bytes detail (UTF-8)
 
 The event bytes are the original binary market-data datagrams, preserving the
 existing packed `MessageHeader`; recovery does not translate or replace the
-market-data protocol. The current server rejects requests that would make the
-encoded reply exceed the frame limit instead of silently truncating them.
+market-data protocol. A successful replay that exceeds one MiB is split into
+`RECOVERY_CHUNK` frames, each carrying the exact payload format above, followed
+by an empty `RECOVERY_COMPLETE` frame. The client concatenates chunks before
+returning the logical response. A single oversized event is rejected with an
+explicit `ERROR` rather than silently truncated.
 
 ## Snapshot request and response
 
@@ -98,8 +103,10 @@ continuity. A bad hash is a recovery failure, not a successful resync.
 `--recovery-policy round-robin` rotates among subscriber identities with
 pending requests. At clean shutdown the exchange prints measured
 connection/request/response counts, recovered-message count, per-subscriber
-service count, and queue-wait average/max. Snapshot requests currently bypass
-this fairness queue and are handled by the connection handler.
+service count, queue-wait average/max, and a Jain scheduler-service fairness
+index. Snapshot requests currently bypass this fairness queue and are handled
+by the connection handler. These counters measure the shared recovery worker;
+they must not be interpreted as network delivery fairness.
 
 ## Status reconciliation
 

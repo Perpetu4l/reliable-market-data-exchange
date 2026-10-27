@@ -227,9 +227,10 @@ class ReliabilityDashboard(QTabWidget):
         self.fairness.waiting_time.setText(
             f"avg/max {exchange_value('recovery_avg_queue_wait_ns')}/"
             f"{exchange_value('recovery_max_queue_wait_ns')} ns")
+        fairness_ppm = exchange_value("recovery_fairness_jain_ppm")
+        fairness = "Unavailable" if fairness_ppm == "Unavailable" else f"{float(fairness_ppm) / 1_000_000:.4f}"
         self.fairness.service_distribution.setText(
-            f"{exchange_value('recovery_subscribers')} subscriber(s), "
-            f"{exchange_value('recovery_messages')} recovered event(s)")
+            f"{exchange_value('recovery_service_distribution')} served; Jain service fairness {fairness}")
         self.delivery_chart.clear()
         self._bars(self.delivery_chart,
                    ["Delivered", "Snapshot\ncovered", "Duplicates", "Gaps", "Replayed", "Unresolved"],

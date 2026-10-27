@@ -132,6 +132,31 @@ TEST(RecoveryWireTests, RoundTripsStatusResponse)
     EXPECT_EQ(decoded->history_minimum_sequence, 101U);
 }
 
+TEST(RecoveryWireTests, AcceptsChunkAndCompletionFrames)
+{
+    MarketDataEvent source;
+    source.header.sequence_number = 12;
+    source.payload.resize(sizeof(MessageHeader));
+    std::memcpy(source.payload.data(), &source.header, sizeof(MessageHeader));
+    const auto chunk_payload = RecoveryWireCodec::encode_response(
+        {RecoveryStatus::OK, {source}, std::nullopt, {}});
+    auto stream = RecoveryWireCodec::frame(RecoveryWireType::RECOVERY_CHUNK, chunk_payload);
+    const auto complete = RecoveryWireCodec::frame(RecoveryWireType::RECOVERY_COMPLETE, {});
+    stream.insert(stream.end(), complete.begin(), complete.end());
+    std::string error;
+    const auto chunk = RecoveryWireCodec::take_frame(stream, error);
+    ASSERT_TRUE(chunk.has_value()) << error;
+    EXPECT_EQ(chunk->type, RecoveryWireType::RECOVERY_CHUNK);
+    const auto decoded = RecoveryWireCodec::decode_response(chunk->payload, error);
+    ASSERT_TRUE(decoded.has_value()) << error;
+    ASSERT_EQ(decoded->events.size(), 1U);
+    EXPECT_EQ(decoded->events.front().header.sequence_number, 12U);
+    const auto end = RecoveryWireCodec::take_frame(stream, error);
+    ASSERT_TRUE(end.has_value()) << error;
+    EXPECT_EQ(end->type, RecoveryWireType::RECOVERY_COMPLETE);
+    EXPECT_TRUE(end->payload.empty());
+}
+
 TEST(RecoveryWireTests, RoundTripsVerifiableCompositeSnapshot)
 {
     SnapshotManager manager({1, 4, true});

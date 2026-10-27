@@ -20,6 +20,11 @@ enum class RecoveryWireType : uint8_t {
     SNAPSHOT_RESPONSE = 4,
     STATUS_REQUEST = 5,
     STATUS_RESPONSE = 6,
+    // A successful retained-event response may exceed one bounded frame. Each
+    // chunk uses the normal recovery-response payload and COMPLETE has an
+    // empty payload. Error replies remain a single RECOVERY_RESPONSE.
+    RECOVERY_CHUNK = 7,
+    RECOVERY_COMPLETE = 8,
 };
 
 struct RecoveryWireFrame {

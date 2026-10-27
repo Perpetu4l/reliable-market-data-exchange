@@ -2,6 +2,8 @@
 #include <utility>
 #include <sys/socket.h>
 #include <cstring>
+#include <algorithm>
+#include <sstream>
 
 Exchange::Exchange(const Mode mode, mdfeed::PublisherConfig md_config, const uint16_t oe_port)
     : mode_(mode), running_(false), md_config_(std::move(md_config)),
@@ -485,6 +487,8 @@ void Exchange::print_final_stats() const
     uint64_t recovery_average_wait = 0;
     uint64_t recovery_max_wait = 0;
     uint64_t recovery_subscribers = 0;
+    uint64_t recovery_fairness_jain_ppm = 0;
+    std::string recovery_service_distribution{"none"};
     std::cout << "\n=== FINAL EXCHANGE STATISTICS ===" << std::endl;
     std::cout << "Market Data Messages sent: " << stats.messages_sent << std::endl;
     std::cout << "Market Data Send failures: " << stats.send_failures << std::endl;
@@ -512,6 +516,29 @@ void Exchange::print_final_stats() const
         recovery_average_wait = average_wait;
         recovery_max_wait = scheduler.max_queue_wait_ns;
         recovery_subscribers = scheduler.per_subscriber_service_distribution.size();
+        if (!scheduler.per_subscriber_service_distribution.empty()) {
+            std::vector<std::pair<std::string, uint64_t>> served(
+                scheduler.per_subscriber_service_distribution.begin(),
+                scheduler.per_subscriber_service_distribution.end());
+            std::sort(served.begin(), served.end());
+            uint64_t total = 0;
+            uint64_t sum_of_squares = 0;
+            std::ostringstream encoded;
+            for (size_t index = 0; index < served.size(); ++index) {
+                total += served[index].second;
+                sum_of_squares += served[index].second * served[index].second;
+                if (index != 0) encoded << ',';
+                encoded << served[index].first << ':' << served[index].second;
+            }
+            recovery_service_distribution = encoded.str();
+            // Scheduler-service fairness only; this is not a claim about
+            // network delivery fairness. Scale Jain's index for parsing.
+            if (sum_of_squares != 0) {
+                recovery_fairness_jain_ppm = static_cast<uint64_t>(
+                    (static_cast<long double>(total) * total * 1'000'000.0L)
+                    / (static_cast<long double>(served.size()) * sum_of_squares));
+            }
+        }
         std::cout << "Recovery TCP connections: " << recovery.connections << std::endl;
         std::cout << "Recovery TCP requests/responses: " << recovery.requests_received << '/'
                   << recovery.responses_sent << std::endl;
@@ -523,6 +550,8 @@ void Exchange::print_final_stats() const
                   << scheduler.max_queue_wait_ns << std::endl;
         std::cout << "Recovery subscribers served: "
                   << scheduler.per_subscriber_service_distribution.size() << std::endl;
+        std::cout << "Recovery service distribution: " << recovery_service_distribution
+                  << " (Jain fairness ppm " << recovery_fairness_jain_ppm << ")" << std::endl;
     }
 
     for (const auto symbols = symbol_manager_->get_all_symbols();
@@ -546,6 +575,8 @@ void Exchange::print_final_stats() const
               << " recovery_avg_queue_wait_ns=" << recovery_average_wait
               << " recovery_max_queue_wait_ns=" << recovery_max_wait
               << " recovery_subscribers=" << recovery_subscribers
+              << " recovery_fairness_jain_ppm=" << recovery_fairness_jain_ppm
+              << " recovery_service_distribution=" << recovery_service_distribution
               << " snapshots_retained=" << snapshot_manager_->snapshot_count()
               << '\n';
 }
