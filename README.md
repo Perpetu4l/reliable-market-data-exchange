@@ -379,6 +379,14 @@ blocks socket binding, so this live path was compiled and its startup-error
 handling was checked here, but it must be run on a normal macOS/Linux host for
 multicast/TCP end-to-end proof.
 
+For a live run, `delivered_events_per_second` is the observed per-subscriber
+delivery rate over its measurement window. `recovery_p50_ns`,
+`recovery_p95_ns`, and `recovery_p99_ns` measure successful TCP repair from
+the recovery request to replay/snapshot application; they intentionally exclude
+the dual-feed grace wait. With more than one subscriber, the dashboard shows
+each saved record but does not pretend that independently calculated percentile
+summaries form one global percentile.
+
 `reliable_subscriber` waits `--gap-grace-ms 2` by default before requesting a
 gap. This lets Feed B supply the missing copy before recovery begins. It keeps
 monotonically scheduled ranges so repeated later packets do not re-request the

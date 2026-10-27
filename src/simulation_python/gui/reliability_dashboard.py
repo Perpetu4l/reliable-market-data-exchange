@@ -176,7 +176,10 @@ class ReliabilityDashboard(QTabWidget):
     def _apply_live_result(self, result: dict) -> None:
         """Present only counters saved by the real multi-process runner."""
         raw_metrics = result.get("subscriber_metrics") or {}
+        single_subscriber_metrics = None
         if raw_metrics and all(isinstance(value, dict) for value in raw_metrics.values()):
+            if len(raw_metrics) == 1:
+                single_subscriber_metrics = next(iter(raw_metrics.values()))
             # A live multi-subscriber run persists one observed record per
             # process. Aggregate count fields only; it does not fabricate
             # latency or a synthetic per-subscriber state.
@@ -191,14 +194,27 @@ class ReliabilityDashboard(QTabWidget):
         value = lambda key: metrics.get(key, "0")
         exchange_value = lambda key: exchange.get(key, "Unavailable")
         success = bool(result.get("success"))
-        self.metrics.throughput.setText("Unavailable for live run")
+        if single_subscriber_metrics:
+            rate = float(single_subscriber_metrics.get("delivered_events_per_second", "0"))
+            self.metrics.throughput.setText(f"{rate:,.1f} delivered events/s")
+            p50_us = float(single_subscriber_metrics.get("recovery_p50_ns", "0")) / 1_000.0
+            p95_us = float(single_subscriber_metrics.get("recovery_p95_ns", "0")) / 1_000.0
+            p99_us = float(single_subscriber_metrics.get("recovery_p99_ns", "0")) / 1_000.0
+            has_recovery_latency = int(value("recovery_requests")) > 0
+        else:
+            self.metrics.throughput.setText("Per-subscriber rate; not aggregated")
+            p50_us = p95_us = p99_us = 0.0
+            has_recovery_latency = False
         self.metrics.duplicates.setText(value("duplicates"))
         self.metrics.gaps.setText(value("gaps"))
-        self.metrics.recovery_percentiles.setText("Unavailable for live run")
+        self.metrics.recovery_percentiles.setText(
+            f"p50/p95/p99: {p50_us:.1f}/{p95_us:.1f}/{p99_us:.1f} µs"
+            if has_recovery_latency else "No successful recovery measured")
         self.recovery.gap_label.setText("No gap detected" if value("gaps") == "0" else f"{value('gaps')} detected gap(s)")
         self.recovery.request_label.setText(
             f"{value('recovery_requests')} request(s), {value('recovered_events')} replayed event(s)")
-        self.recovery.latency_label.setText("Not collected by live subscriber")
+        self.recovery.latency_label.setText(
+            f"p50 {p50_us:.1f} µs (TCP repair)" if has_recovery_latency else "No successful recovery measured")
         self.redundancy.feed_a.setText(f"{exchange_value('feed_a_app_dropped')} application drop(s)")
         self.redundancy.feed_b.setText(f"{exchange_value('feed_b_app_dropped')} application drop(s)")
         self.redundancy.avoided_gaps.setText("Not derived by live subscriber")
@@ -219,7 +235,11 @@ class ReliabilityDashboard(QTabWidget):
                    [float(value("delivered")), float(value("events_covered_by_snapshot")),
                     float(value("duplicates")), float(value("gaps")),
                     float(value("recovered_events")), float(value("permanently_lost"))], "#2677c9")
-        self.latency_chart.clear()
+        if has_recovery_latency:
+            self._bars(self.latency_chart, ["p50", "p95", "p99"],
+                       [p50_us, p95_us, p99_us], "#b35cba")
+        else:
+            self.latency_chart.clear()
         self.summary.setText(
             "Live run completed: the exchange sequence was fully accounted for."
             if success else

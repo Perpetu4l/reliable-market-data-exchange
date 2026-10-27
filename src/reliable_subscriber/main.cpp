@@ -4,6 +4,7 @@
 #include "reliability/BookBuilder.h"
 #include "reliability/Snapshot.h"
 #include "reliability/FaultInjector.h"
+#include "reliability/Metrics.h"
 
 #include <atomic>
 #include <csignal>
@@ -149,6 +150,7 @@ int main(const int argc, char* argv[])
     uint64_t recovery_tasks_in_flight{0}; // protected by recovery_mutex
     BookBuilder local_book;
     SnapshotHasher snapshot_hasher;
+    MetricsCollector recovery_metrics;
     FaultInjector receive_fault_a({config.drop_a, 0.0, 0.0, {}, config.drop_seed});
     FaultInjector receive_fault_b({config.drop_b, 0.0, 0.0, {}, config.drop_seed + 1});
     FaultInjector receive_fault_correlated({config.correlated_loss, 0.0, 0.0, {}, config.drop_seed});
@@ -197,6 +199,7 @@ int main(const int argc, char* argv[])
             }
 
             ++recovery_requests;
+            const auto recovery_started = std::chrono::steady_clock::now();
             RecoveryTcpClient client(config.recovery);
             std::string error;
             const auto response = client.request_missing_data({config.subscriber_id, range}, error);
@@ -205,6 +208,9 @@ int main(const int argc, char* argv[])
                           << range.end_sequence << " events=" << response->events.size() << '\n';
                 for (auto event : response->events) subscriber->on_recovered_event(std::move(event));
                 recovered_events += response->events.size();
+                recovery_metrics.record_recovery_latency(static_cast<uint64_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - recovery_started).count()));
             } else if (response && response->status == RecoveryStatus::TOO_OLD) {
                 const auto snapshot_response = client.request_snapshot(range.end_sequence, error);
                 if (snapshot_response && snapshot_response->status == RecoveryStatus::OK
@@ -221,6 +227,9 @@ int main(const int argc, char* argv[])
                         events_covered_by_snapshot += snapshot_response->snapshot->sequence_number - covered_from + 1;
                     }
                     ++snapshot_recoveries;
+                    recovery_metrics.record_recovery_latency(static_cast<uint64_t>(
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now() - recovery_started).count()));
                     std::cout << "SNAPSHOT RECOVERY OK checkpoint="
                               << snapshot_response->snapshot->sequence_number << " hash="
                               << snapshot_response->snapshot->hash << '\n';
@@ -281,6 +290,7 @@ int main(const int argc, char* argv[])
               << config.feed_a.multicast_port;
     if (receiver_b) std::cout << " Feed B=" << config.feed_b.multicast_ip << ':' << config.feed_b.multicast_port;
     std::cout << " recovery=" << config.recovery.host << ':' << config.recovery.port << '\n';
+    const auto measurement_started = std::chrono::steady_clock::now();
 
     const auto deadline = config.run_seconds == 0
         ? std::optional<std::chrono::steady_clock::time_point>{}
@@ -321,6 +331,12 @@ int main(const int argc, char* argv[])
     recovery_worker_running.store(false);
     recovery_ready.notify_all();
     recovery_worker.join();
+    const auto runtime_ns = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - measurement_started).count());
+    const auto latency_summary = recovery_metrics.snapshot().recovery_latency;
+    const auto delivered_events_per_second = runtime_ns == 0 ? 0.0
+        : static_cast<double>(delivered.load()) * 1'000'000'000.0 / static_cast<double>(runtime_ns);
     const auto accounted_events = delivered.load() + events_covered_by_snapshot.load();
     const auto permanently_lost = exchange_latest_sequence > accounted_events
         ? exchange_latest_sequence - accounted_events : 0;
@@ -336,6 +352,8 @@ int main(const int argc, char* argv[])
               << " snapshot_covered=" << events_covered_by_snapshot
               << " exchange_latest=" << exchange_latest_sequence
               << " permanently_lost=" << permanently_lost
+              << " runtime_ms=" << runtime_ns / 1'000'000
+              << " delivered_events_per_second=" << delivered_events_per_second
               << " recovery_failures=" << recovery_failures << '\n';
     std::cout << "RELIABLE_SUBSCRIBER_RESULT delivered=" << delivered
               << " duplicates=" << subscriber->sequence_tracker().duplicate_count()
@@ -346,6 +364,11 @@ int main(const int argc, char* argv[])
               << " events_covered_by_snapshot=" << events_covered_by_snapshot
               << " exchange_latest_sequence=" << exchange_latest_sequence
               << " permanently_lost=" << permanently_lost
+              << " runtime_ms=" << runtime_ns / 1'000'000
+              << " delivered_events_per_second=" << delivered_events_per_second
+              << " recovery_p50_ns=" << latency_summary.p50_ns
+              << " recovery_p95_ns=" << latency_summary.p95_ns
+              << " recovery_p99_ns=" << latency_summary.p99_ns
               << " recovery_failures=" << recovery_failures
               << " gap_grace_ms=" << config.gap_grace_ms
               << " datagrams_received_a=" << datagrams_received_a
