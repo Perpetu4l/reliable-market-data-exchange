@@ -126,6 +126,7 @@ class ReliabilityExperimentController(QObject):
         interval = int(config["snapshot_interval"]) if config["snapshots_enabled"] else 0
         mode = str(config["mode"])
         arguments = [str(runner), "--build-dir", str(build_dir), "--duration", str(config["duration"]),
+                     "--subscribers", str(config["subscribers"]),
                      "--history", str(config["history"]), "--snapshot-interval", str(interval),
                      "--snapshot-retention", str(config["retention"]), "--fault-seed", str(config["seed"]),
                      "--recovery-policy", str(config["scheduler"])]
@@ -151,7 +152,8 @@ class ReliabilityExperimentController(QObject):
             return False
         self.process = process
         self.status_changed.emit("Running live local experiment")
-        self.log_line.emit("Started live exchange/subscriber runner; result will be persisted as JSON.")
+        self.log_line.emit(
+            f"Started live exchange with {config['subscribers']} subscriber process(es); result will be persisted as JSON.")
         return True
 
     def _read_output(self) -> None:

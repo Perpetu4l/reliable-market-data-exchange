@@ -116,6 +116,7 @@ class ReliabilityDashboard(QTabWidget):
         self.controller.start_live({
             "mode": self.experiment.mode.currentData(),
             "duration": self.experiment.live_duration.value(),
+            "subscribers": self.experiment.live_subscribers.value(),
             "loss_rate": self.experiment.loss_rate.value(),
             "seed": self.experiment.seed.value(),
             "history": self.experiment.history.value(),

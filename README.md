@@ -442,6 +442,12 @@ derived from `--fault-seed`; Feed A/B correlation remains within a subscriber.
 The saved JSON preserves each subscriber's own result and log tail, so failed
 subscribers cannot disappear inside an aggregate result.
 
+The Reliability Dashboard's **Live subscribers** control maps directly to
+`--subscribers`. One means one exchange and one `reliable_subscriber` process;
+larger values start independent subscribers against that same exchange. The
+dashboard aggregates count fields across them, while rate and latency
+percentiles remain per-subscriber to avoid mathematically invalid summaries.
+
 On a normal host, run the live baseline check after building the two targets:
 
 ```sh
