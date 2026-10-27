@@ -6,6 +6,7 @@
 #include <iostream>
 #include <fstream>
 #include <iomanip>
+#include <cstring>
 
 namespace mdfeed {
 class MulticastSocket {
@@ -146,11 +147,15 @@ bool MulticastReceiver::start()
     running_.store(true);
     receiver_thread_ = std::thread(&MulticastReceiver::receiver_loop, this);
     stats_thread_ = std::thread([this]() {
+        std::unique_lock lock(stats_wait_mutex_);
         while (running_.load()) {
-            std::this_thread::sleep_for(config_.stats_interval);
-            if (running_.load()) {
-                print_stats();
+            if (stats_wait_.wait_for(lock, config_.stats_interval,
+                [this] { return !running_.load(); })) {
+                break;
             }
+            lock.unlock();
+            print_stats();
+            lock.lock();
         }
     });
 
@@ -164,6 +169,7 @@ void MulticastReceiver::stop()
     }
 
     running_.store(false);
+    stats_wait_.notify_all();
 
     // recv() is blocking. Closing before joining wakes the receiver thread;
     // the former order could hang shutdown indefinitely while no datagrams

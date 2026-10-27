@@ -18,6 +18,7 @@
 #include <mutex>
 #include <thread>
 #include <algorithm>
+#include <unordered_set>
 
 namespace {
 using namespace mdfeed;
@@ -45,6 +46,7 @@ struct Config {
     double drop_b{0.0};
     double correlated_loss{0.0};
     uint64_t drop_seed{42};
+    bool verbose_deliveries{false};
 };
 
 void usage(const char* program)
@@ -66,7 +68,8 @@ void usage(const char* program)
               << "  --drop-a <rate>           Receive-side Feed A application loss [0,1]\n"
               << "  --drop-b <rate>           Receive-side Feed B application loss [0,1]\n"
               << "  --corr-loss <rate>        Receive-side correlated application loss [0,1]\n"
-              << "  --drop-seed <N>           Deterministic receive-side fault seed (default: 42)\n";
+              << "  --drop-seed <N>           Deterministic receive-side fault seed (default: 42)\n"
+              << "  --verbose-deliveries      Print every applied event (off by default)\n";
 }
 
 bool parse_args(int argc, char* argv[], Config& config)
@@ -76,6 +79,7 @@ bool parse_args(int argc, char* argv[], Config& config)
         if (argument == "--help" || argument == "-h") { usage(argv[0]); return false; }
         if (argument == "--dual-feed") { config.dual_feed = true; continue; }
         if (argument == "--no-recovery") { config.no_recovery = true; continue; }
+        if (argument == "--verbose-deliveries") { config.verbose_deliveries = true; continue; }
         if (index + 1 >= argc) return false;
         const std::string value = argv[++index];
         if (argument == "--feed-a-ip") config.feed_a.multicast_ip = value;
@@ -140,6 +144,9 @@ int main(const int argc, char* argv[])
     std::atomic<uint64_t> datagrams_received_b{0};
     std::atomic<uint64_t> dropped_by_injector_a{0};
     std::atomic<uint64_t> dropped_by_injector_b{0};
+    std::mutex accounting_mutex;
+    std::unordered_set<uint64_t> individually_delivered_sequences;
+    std::unordered_set<uint64_t> snapshot_covered_sequences;
     std::mutex local_book_mutex;
     std::mutex recovery_mutex;
     std::condition_variable recovery_ready;
@@ -159,10 +166,15 @@ int main(const int argc, char* argv[])
         [&](const MarketDataEvent& event) {
             std::lock_guard lock(local_book_mutex);
             (void)local_book.apply(event);
-            ++delivered;
-            std::cout << "DELIVERED seq=" << event.header.sequence_number
-                      << " feed=" << (event.feed_id == FeedId::A ? 'A' : 'B')
-                      << " type=" << event.header.message_type << '\n';
+            {
+                std::lock_guard accounting_lock(accounting_mutex);
+                if (individually_delivered_sequences.insert(event.header.sequence_number).second) ++delivered;
+            }
+            if (config.verbose_deliveries) {
+                std::cout << "DELIVERED seq=" << event.header.sequence_number
+                          << " feed=" << (event.feed_id == FeedId::A ? 'A' : 'B')
+                          << " type=" << event.header.message_type << '\n';
+            }
         },
         [&](const MissingRange range) {
             if (config.no_recovery) return;
@@ -223,8 +235,17 @@ int main(const int argc, char* argv[])
                         local_book.apply_snapshot(*snapshot_response->snapshot);
                     }
                     subscriber->resynchronise_after_snapshot(snapshot_response->snapshot->sequence_number);
-                    if (snapshot_response->snapshot->sequence_number >= covered_from) {
-                        events_covered_by_snapshot += snapshot_response->snapshot->sequence_number - covered_from + 1;
+                        if (snapshot_response->snapshot->sequence_number >= covered_from) {
+                            uint64_t newly_covered = 0;
+                            std::lock_guard accounting_lock(accounting_mutex);
+                            for (uint64_t sequence = covered_from;
+                                 sequence <= snapshot_response->snapshot->sequence_number; ++sequence) {
+                                if (!individually_delivered_sequences.contains(sequence)
+                                    && snapshot_covered_sequences.insert(sequence).second) {
+                                    ++newly_covered;
+                                }
+                            }
+                            events_covered_by_snapshot += newly_covered;
                     }
                     ++snapshot_recoveries;
                     recovery_metrics.record_recovery_latency(static_cast<uint64_t>(
@@ -298,25 +319,38 @@ int main(const int argc, char* argv[])
     while (keep_running.load() && (!deadline || std::chrono::steady_clock::now() < *deadline)) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
-    // Final reconciliation closes the tail-loss hole even if the final UDP
-    // heartbeat was not observed before the duration elapsed.
-    uint64_t exchange_latest_sequence = 0;
-    bool status_reconciled = config.no_recovery;
-    if (!config.no_recovery) {
-        RecoveryTcpClient client(config.recovery);
-        std::string status_error;
-        const auto status = client.request_status(status_error);
-        if (status) {
-            exchange_latest_sequence = status->latest_sequence;
-            subscriber->on_heartbeat(status->latest_sequence);
-            status_reconciled = true;
-        } else {
-            ++recovery_failures;
-            std::cerr << "STATUS RECONCILIATION FAILED: " << status_error << '\n';
-        }
-    }
+    // Stop UDP before choosing the final cut sequence. Otherwise events can
+    // arrive during receiver shutdown after STATUS was sampled, making an
+    // apparently impossible delivered > expected result.
     receiver_a.stop();
     if (receiver_b) receiver_b->stop();
+
+    // Final reconciliation closes the tail-loss hole. The exchange may still
+    // be publishing, so require two equal STATUS observations before treating
+    // its latest sequence as the measurement cut.
+    uint64_t exchange_latest_sequence = 0;
+    bool status_reconciled = false;
+    {
+        RecoveryTcpClient client(config.recovery);
+        std::optional<RecoveryStatusInfo> previous;
+        for (int attempt = 0; attempt < 5; ++attempt) {
+            std::string status_error;
+            const auto status = client.request_status(status_error);
+            if (!status) {
+                std::cerr << "STATUS RECONCILIATION FAILED: " << status_error << '\n';
+                break;
+            }
+            if (previous && previous->latest_sequence == status->latest_sequence
+                && previous->history_minimum_sequence == status->history_minimum_sequence) {
+                exchange_latest_sequence = status->latest_sequence;
+                status_reconciled = true;
+                break;
+            }
+            previous = status;
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+    }
+    if (status_reconciled) subscriber->on_heartbeat(exchange_latest_sequence);
     // A result is emitted only after queued repair work has settled.  This
     // makes a timeout visible instead of silently dropping the final range.
     {
@@ -337,20 +371,39 @@ int main(const int argc, char* argv[])
     const auto latency_summary = recovery_metrics.snapshot().recovery_latency;
     const auto delivered_events_per_second = runtime_ns == 0 ? 0.0
         : static_cast<double>(delivered.load()) * 1'000'000'000.0 / static_cast<double>(runtime_ns);
-    const auto accounted_events = delivered.load() + events_covered_by_snapshot.load();
-    const auto permanently_lost = exchange_latest_sequence > accounted_events
-        ? exchange_latest_sequence - accounted_events : 0;
+    uint64_t accounted_events = 0;
+    uint64_t permanently_lost = 0;
+    bool accounting_valid = status_reconciled;
+    if (status_reconciled) {
+        std::lock_guard lock(accounting_mutex);
+        for (uint64_t sequence = 1; sequence <= exchange_latest_sequence; ++sequence) {
+            const bool individually_delivered = individually_delivered_sequences.contains(sequence);
+            const bool snapshot_covered = snapshot_covered_sequences.contains(sequence);
+            if (individually_delivered && snapshot_covered) {
+                accounting_valid = false;
+                continue;
+            }
+            if (individually_delivered || snapshot_covered) ++accounted_events;
+            else ++permanently_lost;
+        }
+        accounting_valid = accounting_valid && accounted_events + permanently_lost == exchange_latest_sequence
+            && delivered.load() <= exchange_latest_sequence;
+    }
     const bool unresolved_gap = !status_reconciled
         || subscriber->pending_event_count() != 0
         || (config.no_recovery && subscriber->sequence_tracker().gap_count() != 0)
         || recovery_failures.load() != 0
-        || (!config.no_recovery && permanently_lost != 0);
+        || permanently_lost != 0;
+    const std::string run_status = !status_reconciled ? "failed_not_quiescent"
+        : !accounting_valid ? "failed_accounting"
+        : unresolved_gap ? "failed_integrity" : "completed";
     std::cout << "SUMMARY delivered=" << delivered << " duplicates="
               << subscriber->sequence_tracker().duplicate_count() << " gaps="
               << subscriber->sequence_tracker().gap_count() << " recovery_requests="
               << recovery_requests << " snapshot_recoveries=" << snapshot_recoveries
               << " snapshot_covered=" << events_covered_by_snapshot
               << " exchange_latest=" << exchange_latest_sequence
+              << " accounted=" << accounted_events
               << " permanently_lost=" << permanently_lost
               << " runtime_ms=" << runtime_ns / 1'000'000
               << " delivered_events_per_second=" << delivered_events_per_second
@@ -363,6 +416,8 @@ int main(const int argc, char* argv[])
               << " snapshot_recoveries=" << snapshot_recoveries
               << " events_covered_by_snapshot=" << events_covered_by_snapshot
               << " exchange_latest_sequence=" << exchange_latest_sequence
+              << " events_expected=" << exchange_latest_sequence
+              << " accounting_valid=" << (accounting_valid ? 1 : 0)
               << " permanently_lost=" << permanently_lost
               << " runtime_ms=" << runtime_ns / 1'000'000
               << " delivered_events_per_second=" << delivered_events_per_second
@@ -376,8 +431,11 @@ int main(const int argc, char* argv[])
               << " dropped_by_injector_a=" << dropped_by_injector_a
               << " dropped_by_injector_b=" << dropped_by_injector_b
               << " loss_model=" << config.loss_model
-              << " run_status=" << (unresolved_gap ? "failed_integrity" : "completed")
+              << " run_status=" << run_status
               << " feed_mode=" << (config.dual_feed ? "dual" : "single")
               << " recovery_server=" << config.recovery.host << ':' << config.recovery.port << '\n';
-    return unresolved_gap ? 2 : 0;
+    if (run_status == "completed") return 0;
+    if (run_status == "failed_accounting") return 3;
+    if (run_status == "failed_not_quiescent") return 4;
+    return 2;
 }

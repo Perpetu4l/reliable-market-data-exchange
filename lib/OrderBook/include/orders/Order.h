@@ -2,6 +2,8 @@
 
 #include "OrderCore.h"
 
+#include <cstdint>
+
 class Order : public OrderCore {
 public:
     Order(const OrderCore& orderCore, long price, uint32_t quantity, bool isBuy);

@@ -52,6 +52,13 @@ void DualFeedSubscriber::on_packet(const FeedId feed_id, MarketDataEvent packet)
 {
     std::lock_guard lock(mutex_);
     packet.feed_id = feed_id;
+    // A buffered later sequence has already caused its one gap report. A
+    // second feed copy must be a duplicate, not a fresh gap detection.
+    if (packet.header.sequence_number >= sequence_tracker_.expected_sequence()
+        && pending_events_.contains(packet.header.sequence_number)) {
+        sequence_tracker_.record_duplicate();
+        return;
+    }
     const auto result = sequence_tracker_.on_event(packet);
     if (result.disposition == SequenceDisposition::DUPLICATE) return; // first-copy-wins
     if (result.disposition == SequenceDisposition::ACCEPTED) {
@@ -79,10 +86,23 @@ void DualFeedSubscriber::on_heartbeat(const uint64_t last_published_sequence)
 void DualFeedSubscriber::on_recovered_event(MarketDataEvent event)
 {
     std::lock_guard lock(mutex_);
+    if (event.header.sequence_number > sequence_tracker_.expected_sequence()) {
+        // TCP ranges may be delivered by concurrent requests in reverse order.
+        // Buffer them without telling SequenceTracker about a new UDP gap.
+        const auto [_, inserted] = pending_events_.emplace(event.header.sequence_number, std::move(event));
+        if (!inserted) sequence_tracker_.record_duplicate();
+        return;
+    }
     const auto result = sequence_tracker_.on_event(event);
     if (result.disposition != SequenceDisposition::ACCEPTED) return;
     accept_and_deliver(event);
     drain_pending_events();
+}
+
+size_t DualFeedSubscriber::pending_event_count() const
+{
+    std::lock_guard lock(mutex_);
+    return pending_events_.size();
 }
 
 void DualFeedSubscriber::resynchronise_after_snapshot(const uint64_t checkpoint_sequence)

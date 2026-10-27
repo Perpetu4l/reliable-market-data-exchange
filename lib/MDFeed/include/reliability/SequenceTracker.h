@@ -33,6 +33,9 @@ public:
     // first datagram silently loses a dropped head-of-stream event.
     void reset(uint64_t next_expected = 1);
     void resynchronise(uint64_t next_expected);
+    // The dual-feed adapter can identify a duplicate in its own pending map
+    // before handing it to the tracker; retain a single authoritative count.
+    void record_duplicate() { ++duplicate_count_; }
 
 private:
     uint64_t expected_sequence_{1};

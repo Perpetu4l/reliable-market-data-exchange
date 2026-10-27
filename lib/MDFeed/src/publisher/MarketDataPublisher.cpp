@@ -1,4 +1,6 @@
 #include "publisher/MarketDataPublisher.h"
+
+#include <cstring>
 #include <utility>
 
 namespace mdfeed {

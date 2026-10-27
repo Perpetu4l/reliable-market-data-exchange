@@ -85,7 +85,7 @@ public:
     void resynchronise_after_snapshot(uint64_t checkpoint_sequence);
     [[nodiscard]] const SequenceTracker& sequence_tracker() const { return sequence_tracker_; }
     [[nodiscard]] uint64_t expected_sequence() const;
-    [[nodiscard]] size_t pending_event_count() const { return pending_events_.size(); }
+    [[nodiscard]] size_t pending_event_count() const;
 
 private:
     void accept_and_deliver(const MarketDataEvent& event);

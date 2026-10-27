@@ -3,6 +3,7 @@
 #include "ReceiverConfig.h"
 #include "messages/Messages.h"
 #include <atomic>
+#include <condition_variable>
 #include <functional>
 #include <memory>
 #include <thread>
@@ -54,6 +55,8 @@ private:
     std::atomic<bool> running_;
     std::thread receiver_thread_;
     std::thread stats_thread_;
+    std::mutex stats_wait_mutex_;
+    std::condition_variable stats_wait_;
 
     MessageHandler message_handler_;
     Stats stats_;

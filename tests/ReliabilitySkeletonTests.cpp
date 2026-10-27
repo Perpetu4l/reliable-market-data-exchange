@@ -13,6 +13,7 @@
 
 #include <cstring>
 
+using namespace mdfeed;
 using namespace mdfeed::reliability;
 
 namespace {
@@ -214,6 +215,23 @@ TEST(DualFeedSubscriberTests, SnapshotResyncReleasesLaterBufferedEvent)
 
     EXPECT_EQ(delivered, (std::vector<uint64_t>{1, 3}));
     EXPECT_EQ(subscriber.pending_event_count(), 0);
+}
+
+TEST(DualFeedSubscriberTests, BuffersOutOfOrderRecoveredEventsUntilContiguous)
+{
+    std::vector<uint64_t> delivered;
+    DualFeedSubscriber subscriber([&](const MarketDataEvent& received) {
+        delivered.push_back(received.header.sequence_number);
+    });
+
+    subscriber.on_packet(FeedId::A, event(1));
+    subscriber.on_recovered_event(event(3));
+    EXPECT_EQ(delivered, (std::vector<uint64_t>{1}));
+    EXPECT_EQ(subscriber.pending_event_count(), 1U);
+
+    subscriber.on_recovered_event(event(2));
+    EXPECT_EQ(delivered, (std::vector<uint64_t>{1, 2, 3}));
+    EXPECT_EQ(subscriber.pending_event_count(), 0U);
 }
 
 TEST(SnapshotManagerTests, CreatesVerifiableHashChain)
