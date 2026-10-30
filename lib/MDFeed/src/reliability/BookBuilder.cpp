@@ -1,9 +1,18 @@
 #include "reliability/BookBuilder.h"
+#include "reliability/Sha256.h"
 
 #include <cstring>
 
 namespace mdfeed::reliability {
 namespace {
+void append_u32(std::string& output, const uint32_t value)
+{
+    for (int shift = 24; shift >= 0; shift -= 8) output.push_back(static_cast<char>(value >> shift));
+}
+void append_u64(std::string& output, const uint64_t value)
+{
+    for (int shift = 56; shift >= 0; shift -= 8) output.push_back(static_cast<char>(value >> shift));
+}
 template <typename T>
 const T* payload_as(const MarketDataEvent& event)
 {
@@ -14,6 +23,7 @@ const T* payload_as(const MarketDataEvent& event)
 
 bool BookBuilder::apply(const MarketDataEvent& event)
 {
+    std::lock_guard lock(mutex_);
     const auto type = static_cast<MessageType>(event.header.message_type);
     const auto instrument = event.header.instrument_id;
     switch (type) {
@@ -45,6 +55,7 @@ bool BookBuilder::apply(const MarketDataEvent& event)
 
 std::vector<SnapshotPriceLevel> BookBuilder::levels(const uint32_t instrument_id) const
 {
+    std::lock_guard lock(mutex_);
     std::vector<SnapshotPriceLevel> result;
     if (const auto found = books_.find(instrument_id); found != books_.end()) {
         result.reserve(found->second.size());
@@ -57,6 +68,7 @@ std::vector<SnapshotPriceLevel> BookBuilder::levels(const uint32_t instrument_id
 
 std::vector<SnapshotPriceLevel> BookBuilder::all_levels() const
 {
+    std::lock_guard lock(mutex_);
     std::vector<SnapshotPriceLevel> result;
     for (const auto& [instrument, levels] : books_) {
         for (const auto& [key, quantity] : levels) {
@@ -68,7 +80,8 @@ std::vector<SnapshotPriceLevel> BookBuilder::all_levels() const
 
 void BookBuilder::apply_snapshot(const OrderBookSnapshot& snapshot)
 {
-    clear();
+    std::lock_guard lock(mutex_);
+    books_.clear();
     for (const auto& level : snapshot.book_state) {
         const auto instrument = level.instrument_id == 0 ? snapshot.instrument_id : level.instrument_id;
         if (instrument == 0) continue;
@@ -77,8 +90,32 @@ void BookBuilder::apply_snapshot(const OrderBookSnapshot& snapshot)
     last_sequence_ = snapshot.sequence_number;
 }
 
+uint64_t BookBuilder::last_sequence() const
+{
+    std::lock_guard lock(mutex_);
+    return last_sequence_;
+}
+
+std::string BookBuilder::digest() const
+{
+    std::lock_guard lock(mutex_);
+    std::string material;
+    // std::map supplies the required instrument, side (BUY then SELL), and
+    // price order independent of insertion order.
+    for (const auto& [instrument, levels] : books_) {
+        for (const auto& [key, quantity] : levels) {
+            append_u32(material, instrument);
+            material.push_back(static_cast<char>(key.first));
+            append_u64(material, key.second);
+            append_u64(material, quantity);
+        }
+    }
+    return Sha256::hex_digest(material);
+}
+
 void BookBuilder::clear()
 {
+    std::lock_guard lock(mutex_);
     books_.clear();
     last_sequence_ = 0;
 }
