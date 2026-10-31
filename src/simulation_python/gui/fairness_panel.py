@@ -1,12 +1,15 @@
-"""Scheduler fairness and queue-wait panel."""
+"""Compact Scheduler Policy & Server Capacity controls."""
 
-from PyQt6.QtWidgets import QComboBox, QFormLayout, QGroupBox, QLabel, QSpinBox
+from PyQt6.QtWidgets import QComboBox, QGridLayout, QGroupBox, QLabel, QSpinBox
 
 
 class FairnessPanel(QGroupBox):
     def __init__(self, parent=None):
-        super().__init__("Recovery Fairness & Server Capacity Model", parent)
-        layout = QFormLayout(self)
+        super().__init__("Scheduler & Server Capacity Controls", parent)
+        grid = QGridLayout(self)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(4)
+
         self.policy = QComboBox()
         self.policy.addItems(["FCFS", "Round Robin"])
         self.workers = QSpinBox()
@@ -22,24 +25,17 @@ class FairnessPanel(QGroupBox):
         self.delay_per_event_us.setSuffix(" µs")
 
         self.waiting_time = QLabel("—")
-        self.waiting_time.setWordWrap(True)
         self.noisy_quiet_ratio = QLabel("n/a")
-        self.service_distribution = QLabel("No run yet")
-        self.service_distribution.setWordWrap(True)
+        self.service_distribution = QLabel("—")
         self.jain_label = QLabel("n/a")
-        self.jain_label.setWordWrap(True)
-        self.jain_label.setToolTip(
-            "Jain's index J = (sum x_i)^2 / (N * sum x_i^2) on served request counts "
-            "within the saturated window (queue_depth >= 2). Limitation: raw served counts "
-            "reflect demand imbalance rather than scheduling latency fairness; primary "
-            "fairness evidence is per-subscriber queue wait p50/p99/max."
-        )
 
-        layout.addRow("Scheduling policy", self.policy)
-        layout.addRow("Recovery workers", self.workers)
-        layout.addRow("Modelled server capacity delay / request", self.delay_per_req_us)
-        layout.addRow("Modelled server capacity delay / event", self.delay_per_event_us)
-        layout.addRow("Per-subscriber queue wait (p50/p99/max)", self.waiting_time)
-        layout.addRow("Noisy-to-quiet p99 wait ratio", self.noisy_quiet_ratio)
-        layout.addRow("Service distribution", self.service_distribution)
-        layout.addRow("Jain index (saturated window, hover for limitation)", self.jain_label)
+        grid.addWidget(QLabel("<b>Policy:</b>"), 0, 0)
+        grid.addWidget(self.policy, 0, 1)
+        grid.addWidget(QLabel("<b>Workers:</b>"), 0, 2)
+        grid.addWidget(self.workers, 0, 3)
+        grid.addWidget(QLabel("<b>Delay/Req:</b>"), 1, 0)
+        grid.addWidget(self.delay_per_req_us, 1, 1)
+        grid.addWidget(QLabel("<b>Delay/Ev:</b>"), 1, 2)
+        grid.addWidget(self.delay_per_event_us, 1, 3)
+        grid.addWidget(QLabel("<b>RR Advantage:</b>"), 2, 0)
+        grid.addWidget(self.noisy_quiet_ratio, 2, 1, 1, 3)
