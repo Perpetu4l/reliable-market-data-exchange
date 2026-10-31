@@ -88,14 +88,16 @@ class ReliabilityDashboard(QTabWidget):
             "Empty state — preset sweep graphs pre-loaded below; click 'Run Live Experiment' or 'Run In-Process Baseline' to update all 6 graphs."
         )
         self.summary.setWordWrap(True)
+        self.summary.setMinimumHeight(46)
         self.summary.setStyleSheet(
-            "padding: 8px 12px; background: #f8fafc; border: 2px solid #64748b; "
-            "border-radius: 5px; font-weight: 700; font-size: 13px;"
+            "padding: 10px 14px; background: #f8fafc; border: 2px solid #64748b; "
+            "border-radius: 6px; font-weight: 700; font-size: 13px;"
         )
 
         self.provenance_banner = QLabel("Provenance: preset sweep CSVs pre-loaded from results/")
         self.provenance_banner.setWordWrap(True)
-        self.provenance_banner.setStyleSheet("color: #334155; font-size: 12px; font-weight: 600; padding: 2px 6px;")
+        self.provenance_banner.setMinimumHeight(34)
+        self.provenance_banner.setStyleSheet("color: #334155; font-size: 12px; font-weight: 600; padding: 4px 8px;")
 
         self.last_loaded_csv_path: Path | None = None
 
@@ -123,27 +125,32 @@ class ReliabilityDashboard(QTabWidget):
         tuning_row = QWidget()
         tuning_layout = QHBoxLayout(tuning_row)
         tuning_layout.setContentsMargins(0, 0, 0, 0)
-        tuning_layout.setSpacing(10)
+        tuning_layout.setSpacing(12)
         tuning_layout.addWidget(self.snapshot, 1)
         tuning_layout.addWidget(self.fairness, 1)
         tuning_layout.addWidget(self.integrity, 1)
 
         # Action toolbar row for loading/exporting
         export_row = QHBoxLayout()
+        export_row.setSpacing(10)
         self.reload_agg_btn = QPushButton("🔄 Load Preset Sweep Graphs (All 6)")
-        self.reload_agg_btn.setStyleSheet("font-weight: 600; padding: 5px 12px;")
+        self.reload_agg_btn.setMinimumHeight(36)
+        self.reload_agg_btn.setStyleSheet("font-weight: 600; padding: 6px 14px;")
         self.reload_agg_btn.clicked.connect(lambda: self.load_aggregate_csvs())
 
         self.load_run_btn = QPushButton("📂 Open Run JSON / CSV…")
-        self.load_run_btn.setStyleSheet("font-weight: 600; padding: 5px 12px;")
+        self.load_run_btn.setMinimumHeight(36)
+        self.load_run_btn.setStyleSheet("font-weight: 600; padding: 6px 14px;")
         self.load_run_btn.clicked.connect(self._browse_and_load)
 
         self.export_png_btn = QPushButton("🖼 Export 6 Graphs PNG")
-        self.export_png_btn.setStyleSheet("font-weight: 600; padding: 5px 12px;")
+        self.export_png_btn.setMinimumHeight(36)
+        self.export_png_btn.setStyleSheet("font-weight: 600; padding: 6px 14px;")
         self.export_png_btn.clicked.connect(self._export_charts_png)
 
         self.export_csv_btn = QPushButton("💾 Export Active CSV")
-        self.export_csv_btn.setStyleSheet("font-weight: 600; padding: 5px 12px;")
+        self.export_csv_btn.setMinimumHeight(36)
+        self.export_csv_btn.setStyleSheet("font-weight: 600; padding: 6px 14px;")
         self.export_csv_btn.clicked.connect(self._export_active_csv)
 
         export_row.addWidget(self.provenance_banner, 1)
@@ -157,7 +164,8 @@ class ReliabilityDashboard(QTabWidget):
         # 2x3 Visual Charts Grid (spacious!)
         charts_group = QGroupBox("Visual Analytics — 6 Live / Preset Graphs (All 6 Update Dynamically)")
         grid = QGridLayout(charts_group)
-        grid.setSpacing(10)
+        grid.setContentsMargins(12, 14, 12, 12)
+        grid.setSpacing(12)
         grid.addWidget(self.chart1_recovery_vs_loss, 0, 0)
         grid.addWidget(self.chart2_latency_classes, 0, 1)
         grid.addWidget(self.chart3_fcfs_vs_rr, 0, 2)
@@ -168,7 +176,8 @@ class ReliabilityDashboard(QTabWidget):
         # Clean Structured Tables (replacing walls of text!)
         tables_group = QGroupBox("Structured Experiment Telemetry Tables (Per-Subscriber Accounting & System KPIs)")
         tables_layout = QHBoxLayout(tables_group)
-        tables_layout.setSpacing(10)
+        tables_layout.setContentsMargins(12, 14, 12, 12)
+        tables_layout.setSpacing(12)
 
         self.subscriber_summary_table = QTableWidget(0, 12)
         self.subscriber_summary_table.setHorizontalHeaderLabels([
@@ -176,17 +185,19 @@ class ReliabilityDashboard(QTabWidget):
             "Via TCP", "Snap Cov", "Lost", "Redund. Eff", "TCP p50/p99 (µs)", "Book Match",
         ])
         self.subscriber_summary_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.subscriber_summary_table.verticalHeader().setDefaultSectionSize(34)
         self.subscriber_summary_table.setAlternatingRowColors(True)
         self.subscriber_summary_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.subscriber_summary_table.setMinimumHeight(175)
+        self.subscriber_summary_table.setMinimumHeight(210)
 
         self.kpi_table = QTableWidget(6, 4)
         self.kpi_table.setHorizontalHeaderLabels(["System Metric", "Observed Value", "Scheduler / Snapshot Metric", "Observed Value"])
         self.kpi_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.kpi_table.verticalHeader().setVisible(False)
+        self.kpi_table.verticalHeader().setDefaultSectionSize(34)
         self.kpi_table.setAlternatingRowColors(True)
         self.kpi_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.kpi_table.setMinimumHeight(175)
+        self.kpi_table.setMinimumHeight(210)
         self._init_kpi_table()
 
         tables_layout.addWidget(self.subscriber_summary_table, 3)

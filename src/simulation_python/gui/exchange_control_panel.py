@@ -19,7 +19,6 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
-    QFormLayout,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -31,6 +30,7 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
@@ -136,6 +136,8 @@ class ExchangeControlPanel(QWidget):
         widget = QSpinBox()
         widget.setRange(minimum, maximum)
         widget.setValue(value)
+        widget.setMinimumHeight(32)
+        widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         return widget
 
     @staticmethod
@@ -146,7 +148,7 @@ class ExchangeControlPanel(QWidget):
         return scroll
 
     @staticmethod
-    def _make_chart(title: str, y_label: str, x_label: str, min_height: int = 220) -> pg.PlotWidget:
+    def _make_chart(title: str, y_label: str, x_label: str, min_height: int = 230) -> pg.PlotWidget:
         ch = pg.PlotWidget(title=title)
         ch.setMinimumHeight(min_height)
         ch.setBackground("w")
@@ -155,9 +157,17 @@ class ExchangeControlPanel(QWidget):
         ch.showGrid(x=True, y=True, alpha=0.25)
         return ch
 
+    @staticmethod
+    def _style_table(table: QTableWidget, min_height: int = 190, row_height: int = 32) -> None:
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        table.verticalHeader().setDefaultSectionSize(row_height)
+        table.setAlternatingRowColors(True)
+        table.setMinimumHeight(min_height)
+
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setSpacing(6)
+        layout.setSpacing(8)
+        layout.setContentsMargins(10, 10, 10, 10)
 
         self.tabs = QTabWidget()
         self.tabs.addTab(self._scroll(self._local_tab()), "1. Local Simulation (Live Graphs & Tables)")
@@ -169,26 +179,33 @@ class ExchangeControlPanel(QWidget):
         self.event_log = QPlainTextEdit()
         self.event_log.setReadOnly(True)
         self.event_log.setMaximumBlockCount(400)
-        self.event_log.setMinimumHeight(85)
-        self.event_log.setMaximumHeight(115)
+        self.event_log.setMinimumHeight(95)
+        self.event_log.setMaximumHeight(125)
         self.event_log.setPlaceholderText("Live exchange, subscriber, and client process events stream here.")
         layout.addWidget(self.event_log)
 
     def _local_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setSpacing(10)
+        layout.setSpacing(12)
+        layout.setContentsMargins(12, 12, 12, 12)
 
-        # Top Row: Compact Server Config + Lifecycle Action Buttons
+        # Top Row: Spacious Server Config + Lifecycle Action Buttons
         top_row = QHBoxLayout()
+        top_row.setSpacing(14)
 
         config = QGroupBox("Exchange & Recovery Server Parameters")
         cfg_grid = QGridLayout(config)
-        cfg_grid.setHorizontalSpacing(10)
-        cfg_grid.setVerticalSpacing(5)
+        cfg_grid.setContentsMargins(14, 16, 14, 14)
+        cfg_grid.setHorizontalSpacing(12)
+        cfg_grid.setVerticalSpacing(10)
+        cfg_grid.setColumnStretch(1, 1)
+        cfg_grid.setColumnStretch(3, 1)
+        cfg_grid.setColumnStretch(5, 1)
 
         self.port = self._spinbox(1024, 65535, 8080)
         self.md_interface = QLineEdit("127.0.0.1")
+        self.md_interface.setMinimumHeight(32)
         self.dual_feed_check = QCheckBox("Dual Feed (A+B)")
         self.dual_feed_check.setChecked(True)
         self.recovery_port = self._spinbox(1024, 65535, 9090)
@@ -199,6 +216,7 @@ class ExchangeControlPanel(QWidget):
         self.snap_on_demand_check.setChecked(True)
         self.recovery_policy_combo = QComboBox()
         self.recovery_policy_combo.addItems(["fcfs", "round-robin"])
+        self.recovery_policy_combo.setMinimumHeight(32)
         self.recovery_workers_spin = self._spinbox(1, 16, 1)
         self.service_delay_req_spin = self._spinbox(0, 1_000_000, 0)
         self.service_delay_req_spin.setSuffix(" µs")
@@ -206,6 +224,7 @@ class ExchangeControlPanel(QWidget):
         self.service_delay_event_spin.setSuffix(" µs")
         self.tamper_combo = QComboBox()
         self.tamper_combo.addItems(["none", "book_value", "sequence", "previous_hash", "hash"])
+        self.tamper_combo.setMinimumHeight(32)
         self.heartbeat_spin = self._spinbox(50, 10_000, 500)
         self.heartbeat_spin.setSuffix(" ms")
 
@@ -239,18 +258,29 @@ class ExchangeControlPanel(QWidget):
 
         actions = QGroupBox("Workload Parameters & Process Controls")
         act_layout = QVBoxLayout(actions)
+        act_layout.setContentsMargins(14, 16, 14, 14)
+        act_layout.setSpacing(10)
+
         w_grid = QGridLayout()
+        w_grid.setHorizontalSpacing(12)
+        w_grid.setVerticalSpacing(10)
+        w_grid.setColumnStretch(1, 1)
+        w_grid.setColumnStretch(3, 1)
+
         self.client_count = self._spinbox(1, 32, 2)
         self.rate = QDoubleSpinBox()
         self.rate.setRange(0.1, 50_000.0)
         self.rate.setDecimals(1)
         self.rate.setValue(400.0)
+        self.rate.setMinimumHeight(32)
         self.duration = QDoubleSpinBox()
         self.duration.setRange(0.5, 3600.0)
         self.duration.setDecimals(1)
         self.duration.setValue(4.0)
+        self.duration.setMinimumHeight(32)
         self.symbol = QComboBox()
         self.symbol.addItems(["AAPL", "GOOGL", "AMZN", "NFLX", "META"])
+        self.symbol.setMinimumHeight(32)
         self.seed = self._spinbox(0, 2_147_483_647, 11)
 
         w_grid.addWidget(QLabel("<b>Clients:</b>"), 0, 0)
@@ -264,24 +294,30 @@ class ExchangeControlPanel(QWidget):
         act_layout.addLayout(w_grid)
 
         btn_grid = QGridLayout()
+        btn_grid.setSpacing(8)
         self.start_server_button = QPushButton("1. Start Exchange")
+        self.start_server_button.setMinimumHeight(38)
         self.start_server_button.setStyleSheet(
-            "QPushButton { background: #16a34a; color: white; font-weight: bold; padding: 6px; border-radius: 4px; }"
+            "QPushButton { background: #16a34a; color: white; font-weight: bold; padding: 6px 12px; border-radius: 5px; }"
         )
         self.start_subscribers_button = QPushButton("2. Start Subscribers")
+        self.start_subscribers_button.setMinimumHeight(38)
         self.start_subscribers_button.setStyleSheet(
-            "QPushButton { background: #2563eb; color: white; font-weight: bold; padding: 6px; border-radius: 4px; }"
+            "QPushButton { background: #2563eb; color: white; font-weight: bold; padding: 6px 12px; border-radius: 5px; }"
         )
         self.start_workload_button = QPushButton("3. Start Workload")
+        self.start_workload_button.setMinimumHeight(38)
         self.start_workload_button.setStyleSheet(
-            "QPushButton { background: #7c3aed; color: white; font-weight: bold; padding: 6px; border-radius: 4px; }"
+            "QPushButton { background: #7c3aed; color: white; font-weight: bold; padding: 6px 12px; border-radius: 5px; }"
         )
         self.stop_subscribers_button = QPushButton("Reconcile & Stop Subs")
-        self.stop_subscribers_style = "QPushButton { background: #d97706; color: white; font-weight: bold; padding: 6px; border-radius: 4px; }"
+        self.stop_subscribers_button.setMinimumHeight(36)
+        self.stop_subscribers_style = "QPushButton { background: #d97706; color: white; font-weight: bold; padding: 6px 12px; border-radius: 5px; }"
         self.stop_subscribers_button.setStyleSheet(self.stop_subscribers_style)
         self.stop_button = QPushButton("Stop All")
+        self.stop_button.setMinimumHeight(36)
         self.stop_button.setStyleSheet(
-            "QPushButton { background: #dc2626; color: white; font-weight: bold; padding: 6px; border-radius: 4px; }"
+            "QPushButton { background: #dc2626; color: white; font-weight: bold; padding: 6px 12px; border-radius: 5px; }"
         )
 
         self.start_server_button.clicked.connect(self._start_server)
@@ -299,9 +335,11 @@ class ExchangeControlPanel(QWidget):
 
         status_strip = QHBoxLayout()
         self.server_status = QLabel("Stopped")
-        self.server_status.setStyleSheet("font-weight: 700; color: #666;")
+        self.server_status.setMinimumHeight(28)
+        self.server_status.setStyleSheet("font-weight: 700; color: #666; padding: 4px 8px;")
         self.exchange_live_stats_label = QLabel("latest_seq=0 | queue_depth=0 | subscribers=0")
-        self.exchange_live_stats_label.setStyleSheet("font-weight: 600; color: #1e3a8a;")
+        self.exchange_live_stats_label.setMinimumHeight(28)
+        self.exchange_live_stats_label.setStyleSheet("font-weight: 600; color: #1e3a8a; padding: 4px 8px;")
         status_strip.addWidget(QLabel("<b>Exchange:</b>"))
         status_strip.addWidget(self.server_status)
         status_strip.addWidget(self.exchange_live_stats_label, 1)
@@ -314,11 +352,13 @@ class ExchangeControlPanel(QWidget):
         # 2 Live Visual Charts right in Exchange Control!
         charts_box = QGroupBox("Live Visual Telemetry Charts (Subscriber Delivery & Workload ACK Latency)")
         charts_layout = QHBoxLayout(charts_box)
+        charts_layout.setContentsMargins(12, 14, 12, 12)
+        charts_layout.setSpacing(12)
         self.live_sub_chart = self._make_chart(
-            "Live Subscriber Delivered vs Recovered Events", "Events", "Subscriber", 215
+            "Live Subscriber Delivered vs Recovered Events", "Events", "Subscriber", 230
         )
         self.live_exchange_chart = self._make_chart(
-            "Exchange Sequence Progress / Workload ACK RTT (µs)", "Sequence / RTT (µs)", "Tick / Client", 215
+            "Exchange Sequence Progress / Workload ACK RTT (µs)", "Sequence / RTT (µs)", "Tick / Client", 230
         )
         charts_layout.addWidget(self.live_sub_chart, 1)
         charts_layout.addWidget(self.live_exchange_chart, 1)
@@ -328,7 +368,10 @@ class ExchangeControlPanel(QWidget):
         # Subscribers Configuration Table (spacious)
         sub_cfg_box = QGroupBox("Market-Data Subscribers Configuration Table (1–32 Processes)")
         sub_cfg_layout = QVBoxLayout(sub_cfg_box)
+        sub_cfg_layout.setContentsMargins(12, 14, 12, 12)
+        sub_cfg_layout.setSpacing(10)
         top_sub_row = QHBoxLayout()
+        top_sub_row.setSpacing(12)
         self.sub_count_spin = self._spinbox(1, 32, 5)
         self.sub_count_spin.valueChanged.connect(self._sync_subscriber_cfg_rows)
         self.sub_grace_spin = self._spinbox(0, 1000, 2)
@@ -352,44 +395,43 @@ class ExchangeControlPanel(QWidget):
         self.sub_cfg_table.setHorizontalHeaderLabels([
             "ID", "Feeds (a/ab)", "Loss Model", "Drop A", "Drop B", "Corr Loss", "Seed", "Concurrency", "Role",
         ])
-        self.sub_cfg_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.sub_cfg_table.setAlternatingRowColors(True)
-        self.sub_cfg_table.setMinimumHeight(175)
+        self._style_table(self.sub_cfg_table, min_height=205, row_height=34)
         sub_cfg_layout.addWidget(self.sub_cfg_table)
         self._sync_subscriber_cfg_rows(self.sub_count_spin.value())
         layout.addWidget(sub_cfg_box)
 
         # Bottom Row: Live Subscriber Telemetry Table + Workload Clients Table side by side
         bottom_tables = QHBoxLayout()
+        bottom_tables.setSpacing(12)
 
         live_sub_box = QGroupBox("Live Subscriber Status & Reconciliation Table")
         live_sub_layout = QVBoxLayout(live_sub_box)
+        live_sub_layout.setContentsMargins(12, 14, 12, 12)
         self.live_sub_table = QTableWidget(0, 12)
         self.live_sub_table.setHorizontalHeaderLabels([
             "Subscriber", "State", "Feed A/B", "Last Seq", "Delivered",
             "Duplicates", "Gap Ranges", "Recoveries", "Snapshots",
             "Lost", "Book Match", "TCP Latency p50/p99 (µs)",
         ])
-        self.live_sub_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.live_sub_table.setAlternatingRowColors(True)
         self.live_sub_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.live_sub_table.setMinimumHeight(195)
+        self._style_table(self.live_sub_table, min_height=210, row_height=34)
         live_sub_layout.addWidget(self.live_sub_table)
 
         clients_box = QGroupBox("Order-Entry Workload Clients Table")
         client_layout = QVBoxLayout(clients_box)
+        client_layout.setContentsMargins(12, 14, 12, 12)
         self.client_status_label = QLabel("Idle")
+        self.client_status_label.setMinimumHeight(26)
         self.result_label = QLabel("Start exchange + workload to measure client ACK RTT.")
         self.result_label.setWordWrap(True)
+        self.result_label.setMinimumHeight(36)
         client_layout.addWidget(self.client_status_label)
         client_layout.addWidget(self.result_label)
         self.client_table = QTableWidget(0, 2)
         self.client_table.setHorizontalHeaderLabels(["Client ID", "Observed Status & ACK Latency"])
-        self.client_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.client_table.verticalHeader().setVisible(False)
-        self.client_table.setAlternatingRowColors(True)
         self.client_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.client_table.setMinimumHeight(155)
+        self._style_table(self.client_table, min_height=165, row_height=34)
         client_layout.addWidget(self.client_table)
 
         bottom_tables.addWidget(live_sub_box, 3)
@@ -504,72 +546,162 @@ class ExchangeControlPanel(QWidget):
     def _distributed_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
+        layout.setSpacing(14)
+        layout.setContentsMargins(14, 14, 14, 14)
 
-        net_box = QGroupBox("Two-Laptop / LAN Distributed Configuration")
-        form = QFormLayout(net_box)
+        net_box = QGroupBox("Two-Laptop / LAN Distributed Configuration (Full-Width Controls & Commands)")
+        grid = QGridLayout(net_box)
+        grid.setContentsMargins(18, 20, 18, 18)
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(14)
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(3, 1)
+
         self.lan_iface_combo = QComboBox()
+        self.lan_iface_combo.setMinimumHeight(36)
+        self.lan_iface_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         for label, ip in discover_lan_ipv4_addresses():
             self.lan_iface_combo.addItem(f"{label}: {ip}", ip)
         self.lan_iface_combo.currentIndexChanged.connect(self._on_lan_iface_selected)
 
         self.remote_host = QLineEdit(self.lan_iface_combo.currentData() or "127.0.0.1")
+        self.remote_host.setMinimumHeight(36)
+        self.remote_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+
         self.remote_sub_iface = QLineEdit("<SUBSCRIBER_OWN_LAN_IP>")
+        self.remote_sub_iface.setMinimumHeight(36)
+        self.remote_sub_iface.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+
         self.remote_port = self._spinbox(1024, 65535, 8080)
+        self.remote_port.setMinimumHeight(36)
         self.remote_recovery_port = self._spinbox(1024, 65535, 9090)
+        self.remote_recovery_port.setMinimumHeight(36)
 
-        self.start_lan_exchange_btn = QPushButton("▶ Start Exchange on LAN Interface")
+        # Row 0: Local Interfaces & Exchange LAN IP
+        grid.addWidget(QLabel("<b>Detected Local IPv4 Interfaces:</b>"), 0, 0)
+        grid.addWidget(self.lan_iface_combo, 0, 1)
+        grid.addWidget(QLabel("<b>Exchange LAN IPv4 Address:</b>"), 0, 2)
+        grid.addWidget(self.remote_host, 0, 3)
+
+        # Row 1: Remote Subscriber IP & Ports
+        grid.addWidget(QLabel("<b>Remote Subscriber's Own LAN IP:</b>"), 1, 0)
+        grid.addWidget(self.remote_sub_iface, 1, 1)
+        ports_row = QHBoxLayout()
+        ports_row.setSpacing(10)
+        ports_row.addWidget(QLabel("<b>OE Port:</b>"))
+        ports_row.addWidget(self.remote_port, 1)
+        ports_row.addWidget(QLabel("<b>Recovery Port:</b>"))
+        ports_row.addWidget(self.remote_recovery_port, 1)
+        grid.addWidget(QLabel("<b>TCP Ports:</b>"), 1, 2)
+        grid.addLayout(ports_row, 1, 3)
+
+        # Row 2: Action Buttons spanning full width
+        self.start_lan_exchange_btn = QPushButton("▶ Start Exchange Here on LAN Interface")
+        self.start_lan_exchange_btn.setMinimumHeight(42)
+        self.start_lan_exchange_btn.setStyleSheet(
+            "QPushButton { background: #16a34a; color: white; font-weight: bold; font-size: 13px; padding: 8px 16px; border-radius: 6px; }"
+            "QPushButton:hover { background: #15803d; }"
+        )
         self.start_lan_exchange_btn.clicked.connect(self._start_lan_exchange)
+
         self.test_conn_btn = QPushButton("🔌 Test TCP Reachability (Order-Entry + Recovery)")
+        self.test_conn_btn.setMinimumHeight(42)
+        self.test_conn_btn.setStyleSheet(
+            "QPushButton { background: #2563eb; color: white; font-weight: bold; font-size: 13px; padding: 8px 16px; border-radius: 6px; }"
+            "QPushButton:hover { background: #1d4ed8; }"
+        )
         self.test_conn_btn.clicked.connect(self._test_remote_connection)
-        self.test_conn_label = QLabel("Not tested yet")
+
+        action_btns_row = QHBoxLayout()
+        action_btns_row.setSpacing(14)
+        action_btns_row.addWidget(self.start_lan_exchange_btn, 1)
+        action_btns_row.addWidget(self.test_conn_btn, 1)
+        grid.addLayout(action_btns_row, 2, 0, 1, 4)
+
+        # Row 3: Connection check result — spacious full-width banner (never clipped!)
+        self.test_conn_label = QLabel("Not tested yet — click 'Test TCP Reachability' above")
         self.test_conn_label.setWordWrap(True)
+        self.test_conn_label.setMinimumHeight(54)
+        self.test_conn_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.test_conn_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        self.test_conn_label.setStyleSheet(
+            "padding: 10px 14px; border: 1px solid #64748b; border-radius: 6px; font-weight: 600; font-size: 13px;"
+        )
+        grid.addWidget(QLabel("<b>Connection Check Result:</b>"), 3, 0)
+        grid.addWidget(self.test_conn_label, 3, 1, 1, 3)
 
-        form.addRow("Detected local IPv4 interfaces", self.lan_iface_combo)
-        form.addRow("Exchange LAN IPv4 address", self.remote_host)
-        form.addRow("Remote subscriber's own LAN IP", self.remote_sub_iface)
-        form.addRow("Order-Entry TCP port", self.remote_port)
-        form.addRow("Recovery TCP port", self.remote_recovery_port)
-        form.addRow(self.start_lan_exchange_btn)
-        form.addRow(self.test_conn_btn)
-        form.addRow("Connection check result", self.test_conn_label)
-
+        # Rows 4, 5, 6: Full-width spacious command boxes
+        cmd_style = (
+            "QPlainTextEdit { font-family: Menlo, Consolas, monospace; font-size: 13px; "
+            "padding: 8px 12px; border: 1px solid #475569; border-radius: 6px; }"
+        )
         self.cmd_exchange = QPlainTextEdit()
         self.cmd_exchange.setReadOnly(True)
-        self.cmd_exchange.setMaximumHeight(58)
+        self.cmd_exchange.setMinimumHeight(76)
+        self.cmd_exchange.setMaximumHeight(96)
+        self.cmd_exchange.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.cmd_exchange.setStyleSheet(cmd_style)
+
         self.cmd_workload = QPlainTextEdit()
         self.cmd_workload.setReadOnly(True)
-        self.cmd_workload.setMaximumHeight(58)
+        self.cmd_workload.setMinimumHeight(76)
+        self.cmd_workload.setMaximumHeight(96)
+        self.cmd_workload.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.cmd_workload.setStyleSheet(cmd_style)
+
         self.cmd_subscriber = QPlainTextEdit()
         self.cmd_subscriber.setReadOnly(True)
-        self.cmd_subscriber.setMaximumHeight(68)
+        self.cmd_subscriber.setMinimumHeight(82)
+        self.cmd_subscriber.setMaximumHeight(104)
+        self.cmd_subscriber.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.cmd_subscriber.setStyleSheet(cmd_style)
 
-        form.addRow("1. Exchange command", self.cmd_exchange)
-        form.addRow("2. Remote workload_client command", self.cmd_workload)
-        form.addRow("3. Remote reliable_subscriber command", self.cmd_subscriber)
+        grid.addWidget(QLabel("<b>1. Exchange Command:</b>"), 4, 0, Qt.AlignmentFlag.AlignTop)
+        grid.addWidget(self.cmd_exchange, 4, 1, 1, 3)
 
+        grid.addWidget(QLabel("<b>2. Remote workload_client Command:</b>"), 5, 0, Qt.AlignmentFlag.AlignTop)
+        grid.addWidget(self.cmd_workload, 5, 1, 1, 3)
+
+        grid.addWidget(QLabel("<b>3. Remote reliable_subscriber Command:</b>"), 6, 0, Qt.AlignmentFlag.AlignTop)
+        grid.addWidget(self.cmd_subscriber, 6, 1, 1, 3)
+
+        # Row 7: Full-width copy buttons with generous height & padding
         copy_row = QHBoxLayout()
-        btn_update = QPushButton("Update commands")
+        copy_row.setSpacing(12)
+        btn_update = QPushButton("🔄 Update Commands")
+        btn_update.setMinimumHeight(40)
+        btn_update.setStyleSheet("padding: 8px 14px; font-weight: 600;")
         btn_update.clicked.connect(self._update_remote_command)
-        btn_copy_ex = QPushButton("Copy exchange command")
+
+        btn_copy_ex = QPushButton("📋 Copy Exchange Command")
+        btn_copy_ex.setMinimumHeight(40)
+        btn_copy_ex.setStyleSheet("padding: 8px 14px; font-weight: 600;")
         btn_copy_ex.clicked.connect(lambda: QGuiApplication.clipboard().setText(self.cmd_exchange.toPlainText()))
-        btn_copy_wk = QPushButton("Copy workload_client command")
+
+        btn_copy_wk = QPushButton("📋 Copy workload_client Command")
+        btn_copy_wk.setMinimumHeight(40)
+        btn_copy_wk.setStyleSheet("padding: 8px 14px; font-weight: 600;")
         btn_copy_wk.clicked.connect(lambda: QGuiApplication.clipboard().setText(self.cmd_workload.toPlainText()))
-        btn_copy_sub = QPushButton("Copy reliable_subscriber command")
+
+        btn_copy_sub = QPushButton("📋 Copy reliable_subscriber Command")
+        btn_copy_sub.setMinimumHeight(40)
+        btn_copy_sub.setStyleSheet("padding: 8px 14px; font-weight: 600;")
         btn_copy_sub.clicked.connect(lambda: QGuiApplication.clipboard().setText(self.cmd_subscriber.toPlainText()))
-        copy_row.addWidget(btn_update)
-        copy_row.addWidget(btn_copy_ex)
-        copy_row.addWidget(btn_copy_wk)
-        copy_row.addWidget(btn_copy_sub)
-        form.addRow(copy_row)
+
+        copy_row.addWidget(btn_update, 1)
+        copy_row.addWidget(btn_copy_ex, 1)
+        copy_row.addWidget(btn_copy_wk, 1)
+        copy_row.addWidget(btn_copy_sub, 1)
+        grid.addLayout(copy_row, 7, 0, 1, 4)
+
         layout.addWidget(net_box)
 
         peers_box = QGroupBox("Live Connected Remote Clients & Subscribers Table")
         peers_layout = QVBoxLayout(peers_box)
+        peers_layout.setContentsMargins(14, 16, 14, 14)
         self.remote_peers_table = QTableWidget(0, 4)
         self.remote_peers_table.setHorizontalHeaderLabels(["Type", "ID", "Address / Reason", "Status"])
-        self.remote_peers_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.remote_peers_table.setAlternatingRowColors(True)
-        self.remote_peers_table.setMinimumHeight(180)
+        self._style_table(self.remote_peers_table, min_height=200, row_height=34)
         peers_layout.addWidget(self.remote_peers_table)
         layout.addWidget(peers_box)
 
@@ -594,65 +726,111 @@ class ExchangeControlPanel(QWidget):
         oe_p = self.remote_port.value()
         rec_p = self.remote_recovery_port.value()
         results: list[str] = []
+        all_ok = True
         for label, p in (("Order-Entry TCP", oe_p), ("Recovery TCP", rec_p)):
             try:
                 with socket.create_connection((host, p), timeout=1.5):
                     results.append(f"{label} ({host}:{p}): OK (reachable)")
             except ConnectionRefusedError:
+                all_ok = False
                 results.append(f"{label} ({host}:{p}): FAILED — connection refused (exchange not running on port {p})")
             except socket.timeout:
+                all_ok = False
                 results.append(f"{label} ({host}:{p}): FAILED — timed out (firewall blocking port {p} or wrong IP)")
             except OSError as exc:
+                all_ok = False
                 results.append(f"{label} ({host}:{p}): FAILED — {exc} (check LAN IP / interface)")
-        self.test_conn_label.setText(" | ".join(results))
+        self.test_conn_label.setText("   |   ".join(results))
+        if all_ok:
+            self.test_conn_label.setStyleSheet(
+                "padding: 10px 14px; background: #f0fdf4; color: #15803d; "
+                "border: 2px solid #16a34a; border-radius: 6px; font-weight: 700; font-size: 13px;"
+            )
+        else:
+            self.test_conn_label.setStyleSheet(
+                "padding: 10px 14px; background: #fef2f2; color: #b91c1c; "
+                "border: 2px solid #dc2626; border-radius: 6px; font-weight: 700; font-size: 13px;"
+            )
 
     def _manual_tab(self) -> QWidget:
         page = QWidget()
         layout = QHBoxLayout(page)
+        layout.setSpacing(14)
+        layout.setContentsMargins(14, 14, 14, 14)
 
         box = QGroupBox("Submit Real TCP Limit Order")
-        form = QFormLayout(box)
+        grid = QGridLayout(box)
+        grid.setContentsMargins(16, 18, 16, 16)
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(12)
+        grid.setColumnStretch(1, 1)
+
         self.manual_host = QLineEdit("127.0.0.1")
+        self.manual_host.setMinimumHeight(36)
         self.manual_port = self._spinbox(1024, 65535, 8080)
+        self.manual_port.setMinimumHeight(36)
         self.manual_symbol = QComboBox()
         self.manual_symbol.addItems(["AAPL", "GOOGL", "AMZN", "NFLX", "META"])
+        self.manual_symbol.setMinimumHeight(36)
         self.manual_side = QComboBox()
         self.manual_side.addItems(["BUY", "SELL"])
+        self.manual_side.setMinimumHeight(36)
         self.manual_price = QDoubleSpinBox()
         self.manual_price.setRange(0.01, 1_000_000.00)
         self.manual_price.setDecimals(2)
         self.manual_price.setValue(500.00)
+        self.manual_price.setMinimumHeight(36)
         self.manual_quantity = self._spinbox(1, 1_000_000, 10)
+        self.manual_quantity.setMinimumHeight(36)
+
         submit = QPushButton("▶ Send Order Over TCP")
-        submit.setMinimumHeight(40)
+        submit.setMinimumHeight(44)
         submit.setStyleSheet(
-            "QPushButton { background: #2563eb; color: white; font-weight: bold; border-radius: 5px; }"
+            "QPushButton { background: #2563eb; color: white; font-weight: bold; font-size: 14px; padding: 8px 16px; border-radius: 6px; }"
+            "QPushButton:hover { background: #1d4ed8; }"
         )
         submit.clicked.connect(self._submit_manual)
+
         self.manual_result = QPlainTextEdit("No manual request sent")
         self.manual_result.setReadOnly(True)
-        self.manual_result.setMaximumHeight(75)
+        self.manual_result.setMinimumHeight(88)
+        self.manual_result.setMaximumHeight(120)
+        self.manual_result.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+
         self.fanout_label = QLabel("Fan-out: waiting for manual order")
         self.fanout_label.setWordWrap(True)
+        self.fanout_label.setMinimumHeight(48)
+        self.fanout_label.setStyleSheet(
+            "padding: 8px 12px; border: 1px solid #64748b; border-radius: 6px; font-weight: 600;"
+        )
 
-        form.addRow("Server", self.manual_host)
-        form.addRow("TCP port", self.manual_port)
-        form.addRow("Instrument", self.manual_symbol)
-        form.addRow("Side", self.manual_side)
-        form.addRow("Limit price (USD)", self.manual_price)
-        form.addRow("Quantity", self.manual_quantity)
-        form.addRow(submit)
-        form.addRow("Latest Response", self.manual_result)
-        form.addRow("Subscriber Fan-Out", self.fanout_label)
+        grid.addWidget(QLabel("<b>Server IPv4:</b>"), 0, 0)
+        grid.addWidget(self.manual_host, 0, 1)
+        grid.addWidget(QLabel("<b>TCP Port:</b>"), 1, 0)
+        grid.addWidget(self.manual_port, 1, 1)
+        grid.addWidget(QLabel("<b>Instrument:</b>"), 2, 0)
+        grid.addWidget(self.manual_symbol, 2, 1)
+        grid.addWidget(QLabel("<b>Side:</b>"), 3, 0)
+        grid.addWidget(self.manual_side, 3, 1)
+        grid.addWidget(QLabel("<b>Limit Price (USD):</b>"), 4, 0)
+        grid.addWidget(self.manual_price, 4, 1)
+        grid.addWidget(QLabel("<b>Quantity:</b>"), 5, 0)
+        grid.addWidget(self.manual_quantity, 5, 1)
+        grid.addWidget(submit, 6, 0, 1, 2)
+        grid.addWidget(QLabel("<b>Latest Response:</b>"), 7, 0, Qt.AlignmentFlag.AlignTop)
+        grid.addWidget(self.manual_result, 7, 1)
+        grid.addWidget(QLabel("<b>Subscriber Fan-Out:</b>"), 8, 0)
+        grid.addWidget(self.fanout_label, 8, 1)
+        grid.setRowStretch(9, 1)
 
         right_col = QGroupBox("Manual Order RTT Graph & Submission History Table")
         right_layout = QVBoxLayout(right_col)
-        self.manual_rtt_chart = self._make_chart("Manual Order TCP Round-Trip Time (ms)", "RTT (ms)", "Order #", 240)
+        right_layout.setContentsMargins(14, 16, 14, 14)
+        right_layout.setSpacing(12)
+        self.manual_rtt_chart = self._make_chart("Manual Order TCP Round-Trip Time (ms)", "RTT (ms)", "Order #", 250)
         self.manual_history_table = QTableWidget(0, 6)
         self.manual_history_table.setHorizontalHeaderLabels(["Order #", "Symbol", "Side", "Price ($)", "Qty", "Response & RTT"])
-        self.manual_history_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.manual_history_table.setAlternatingRowColors(True)
-        self.manual_history_table.setMinimumHeight(200)
+        self._style_table(self.manual_history_table, min_height=220, row_height=34)
         right_layout.addWidget(self.manual_rtt_chart)
         right_layout.addWidget(self.manual_history_table)
 
@@ -663,14 +841,19 @@ class ExchangeControlPanel(QWidget):
     def _results_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
+        layout.setSpacing(12)
+        layout.setContentsMargins(14, 14, 14, 14)
 
         btn_row = QHBoxLayout()
+        btn_row.setSpacing(12)
         refresh = QPushButton("🔄 Refresh Saved Results")
-        refresh.setStyleSheet("font-weight: 600; padding: 6px 14px;")
+        refresh.setMinimumHeight(38)
+        refresh.setStyleSheet("font-weight: 600; padding: 6px 16px;")
         refresh.clicked.connect(self._refresh_saved_results)
         self.open_in_dashboard_btn = QPushButton("📊 Open Selected in 6-Graph Reliability Dashboard")
+        self.open_in_dashboard_btn.setMinimumHeight(38)
         self.open_in_dashboard_btn.setStyleSheet(
-            "background: #2563eb; color: white; font-weight: bold; padding: 6px 14px; border-radius: 4px;"
+            "background: #2563eb; color: white; font-weight: bold; padding: 6px 16px; border-radius: 5px;"
         )
         self.open_in_dashboard_btn.clicked.connect(self._open_selected_in_dashboard)
         btn_row.addWidget(refresh)
@@ -679,24 +862,25 @@ class ExchangeControlPanel(QWidget):
         layout.addLayout(btn_row)
 
         top_split = QHBoxLayout()
+        top_split.setSpacing(14)
         self.saved_results = QListWidget()
         self.saved_results.itemSelectionChanged.connect(self._preview_saved_result)
-        self.saved_results.setMinimumHeight(220)
+        self.saved_results.setMinimumHeight(230)
 
-        self.saved_result_chart = self._make_chart("Selected Result Visual Preview", "Value", "Row / Metric", 220)
+        self.saved_result_chart = self._make_chart("Selected Result Visual Preview", "Value", "Row / Metric", 230)
         top_split.addWidget(self.saved_results, 2)
         top_split.addWidget(self.saved_result_chart, 3)
         layout.addLayout(top_split)
 
         self.saved_result_table = QTableWidget(0, 0)
-        self.saved_result_table.setAlternatingRowColors(True)
         self.saved_result_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.saved_result_table.setMinimumHeight(210)
+        self._style_table(self.saved_result_table, min_height=220, row_height=34)
         layout.addWidget(self.saved_result_table)
 
         self.result_preview = QPlainTextEdit()
         self.result_preview.setReadOnly(True)
-        self.result_preview.setMaximumHeight(110)
+        self.result_preview.setMinimumHeight(90)
+        self.result_preview.setMaximumHeight(120)
         layout.addWidget(self.result_preview)
 
         self._refresh_saved_results()
@@ -776,7 +960,6 @@ class ExchangeControlPanel(QWidget):
                 self.saved_result_table.setItem(r_idx, c_idx, QTableWidgetItem(str(row.get(col_name, ""))))
         self.saved_result_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
 
-        # Plot a numeric column visually
         self.saved_result_chart.clear()
         self.saved_result_chart.setTitle(f"Preview: {title}")
         candidate_cols = [
@@ -1062,7 +1245,7 @@ class ExchangeControlPanel(QWidget):
     def _set_server_status(self, status: str) -> None:
         self.server_status.setText(status)
         colour = {"Ready": "#197b30", "Starting": "#9a6700", "Stopped": "#666"}.get(status, "#b42318")
-        self.server_status.setStyleSheet(f"font-weight: 700; color: {colour};")
+        self.server_status.setStyleSheet(f"font-weight: 700; color: {colour}; padding: 4px 8px;")
 
     def _show_result(self, result: dict) -> None:
         cid = int(result.get("client_id", 1))
