@@ -1,38 +1,18 @@
-# Implementation checklist
+# Implementation Checklist (`docs/IMPLEMENTATION_CHECKLIST.md`)
 
-This checklist maps the October 2026 design document to the executable code.
-It is deliberately status-oriented: a design item is not marked complete just
-because an interface or a GUI label exists.
+This checklist maps the Group 11 system requirements and Round 2 audit requirements to the verified code and tests in this repository.
 
-| Requirement | Design reference | Current status | Implemented evidence | Verification |
-| --- | --- | --- | --- | --- |
-| Central authoritative matching engine and books | 1, 2.1 | Implemented | Preserved in `src/exchange/Exchange.cpp` and `lib/OrderBook/` | Existing order-book tests; TCP workload check |
-| TCP order-entry server and independent clients | 1, 2.1 | Partial: sockets existed, but framing and response handling were incomplete | Complete framed stream parsing, partial-write handling, handshake, response reads and workload executable | Local loopback exchange plus two `workload_client` processes |
-| Multiple concurrent clients | Prompt 3.1, 5 | Broken: multiple receive threads wrote to an SPSC queue | Replaced order-entry handoff with a bounded mutex-protected multi-producer queue | Two simultaneous workload processes |
-| Client identity and connection lifecycle | Prompt 5 | Missing | `CLIENT_HELLO` / `SERVER_WELCOME`, active-connection and malformed-frame counters | Workload handshake plus graceful disconnect output |
-| Manual real order path | Prompt 4.4, 6 | Terminal client only, no response display | Terminal client now prints actual responses; GUI opens a real socket, handshakes, submits a packed order, and displays ACK/reject RTT | Off-screen GUI protocol submit received `ORDER_ACK` |
-| Automatic real TCP workload | Prompt 3.2, 7 | Missing | `src/workload_client/main.cpp` generates reproducible orders from a separate process and reports client-measured acknowledgement RTT | End-to-end loopback run |
-| Server validation and order lifecycle | Prompt 6 | Partial | Reject zero quantity / invalid limit price; scope client order ids per connection; add modify support through the existing book | Build plus workload acknowledgements |
-| UDP market data | 2.1, 3.1 | Implemented as one existing multicast publisher/receiver | Preserved; public market data remains distinct from private TCP responses | Existing exchange publisher code and receiver |
-| Dual UDP feed endpoints | 2.1, 3.1 | Implemented; normal-host verification pending | Exchange publishes identical binary datagrams to Feed A/B with `--dual-feed`; `reliable_subscriber` joins both endpoints | Build passed; sandbox prohibits multicast/TCP binding |
-| Sequence tracking, duplicates, bounded replay history | 3.2--3.4 | Implemented | Used by `reliable_subscriber`; exchange retains published binary events in bounded history | Reliability source tests; normal-host socket run pending |
-| TCP recovery protocol / shared scheduler | 3.3, 3.6 | Implemented; normal-host verification pending | Framed TCP retained replay, chunked large replies, status reconciliation, and FCFS/Round Robin scheduler | Build passed; sandbox prohibits listener verification |
-| Snapshots and tamper-evident chain | 3.5 | Implemented in memory | Exchange builds composite published-level snapshots; TCP transfer and subscriber application use SHA-256 verification | Codec/source tests; normal-host socket run pending |
-| Fault injection experiments | 3.7 | Implemented at application layer | Deterministic receive-/publisher-side Feed A/B/correlated withholding; reordering/delay remain absent | Build/CLI validation; normal-host socket run pending |
-| Telemetry and CSV | 3.8 | Implemented within stated measurement boundaries | Demo writes CSV; live runner writes provenance-preserving JSON with subscriber integrity/rate/repair-latency and scheduler counters | GUI render and runner failure-path checks passed; normal-host successful run pending |
-| Existing PyQt6 simulator and charts | 4 | Implemented local in-process simulator | Preserve; it must not be labelled as network live data | Start GUI after optional pybind build |
-| Local/dashboard controls and actual backend effects | 4 and prompt 4, 8--11 | Compiled deterministic reliability experiment | Exchange Control has process controller, readiness gate, manual socket form, and result persistence. Reliability Experiments launches `reliability_demo` with its selected loss, feed, snapshot, and scheduler settings and renders final metrics. | GUI-controller end-to-end process run |
-
-## Measurement boundaries
-
-`workload_client` reports acknowledgement RTT measured from immediately before a
-client calls `send_new_order` until that same client receives `ORDER_ACK` over
-the TCP connection. In local mode this is a loopback request-response
-measurement. It is not one-way latency, exchange matching latency, or a
-physical-network latency claim.
-
-The reliability demo's recovery metrics are generated by its explicitly
-in-process experiment harness. They are useful for controlled design checks,
-but are not measurements from the live TCP recovery service. The live service
-runner persists final observed counters as JSON, not a time-series. It does
-not claim a continuous live telemetry stream.
+| Requirement | Design / Audit Reference | Status | Implemented Evidence | Verification Proof |
+| :--- | :--- | :--- | :--- | :--- |
+| **Central authoritative matching engine & order books** | Design 1, 2.1 | Verified | `src/exchange/Exchange.cpp`, `lib/OrderBook/` (`AAPL`, `GOOGL`, `AMZN`, `NFLX`, `META`) | `OrderBookTests`, `MatchingEngineTests`, `OrderBookEntryTests` |
+| **Framed TCP order-entry server, handshake & multi-client queue** | Design 2.1, Round 1 | Verified | `lib/OrderEntry/src/server/OrderEntryServer.cpp` (`CLIENT_HELLO` / `SERVER_WELCOME`, `CLIENT_CONNECTED` logging, thread-safe queue) | `OrderEntryProtocolTests`, `OrderEntryQueueTests`, multi-client `workload_client` runs |
+| **Reproducible TCP workload generator** | Round 1 & R4 | Verified | `src/workload_client/main.cpp` (crossing buy/sell order flow, client-measured ACK RTT `p50`/`p95`/`p99`) | `live_reliability_runner.py` (`1000–3000+` events per 3–5 s run) |
+| **Dual UDP multicast feeds (Feed A & Feed B) + Heartbeats** | Design 3.1, R1 | Verified | `src/exchange/Exchange.cpp` (`--dual-feed`), `MulticastPublisher`, `MulticastReceiver` (`stop() < 15 ms`) | `LiveReliabilityBaseline`, `32`-subscriber scalability run |
+| **First-copy-wins sequencing, gap detection & redundancy bitsets** | Design 3.2, R1, R2 | Verified | `SequenceTracker`, `DualFeedSubscriber` (`arrived_a_`, `arrived_b_`, `delivered_source_`, `snapshot_covered_`, out-of-order recovery buffering) | `SequenceTrackerTests`, `DualFeedSubscriberTests`, `redundancy_sweep` preset |
+| **Per-missing-event repair latency by class + nearest-rank percentiles** | Audit F4, R2 | Verified | `DualFeedSubscriber` injectable clock (`other_feed`, `tcp_recovery`, `snapshot`), `tcp_request_rtt`, `compute_latency_summary`, `--latency-csv` | `DualFeedSubscriberTests.ClassifiesPerMissingEventLatencyWithInjectedClock`, Chart 3 & Chart 6 |
+| **Bounded publisher history & framed TCP recovery protocol v2** | Design 3.3, 3.4, R1–R3 | Verified | `RecoveryHistory`, `RecoveryWire` (`PROTOCOL_VERSION = 2`, chunked replay `RECOVERY_CHUNK` + `RECOVERY_COMPLETE`, `STATUS` with `latest_book_digest`, `BYE`) | `RecoveryHistoryTests`, `RecoveryWireV2Tests`, `LiveReliabilityBaseline` |
+| **On-demand & periodic composite snapshots with SHA-256 chain** | Design 3.5, Audit F6/F7, R2/R3 | Verified | `SnapshotManager`, `SnapshotHasher` (SHA-256), `RecoveryServer::send_snapshot` (`--snapshot-on-demand`), `BookBuilder::digest()` verification | `SnapshotManagerTests`, `history_snapshot_sweep` (`0` failures), `snapshot_tamper` preset (`5` modes) |
+| **FCFS & Round-Robin recovery scheduler with contention & fairness metrics** | Design 3.6, Audit F5, R3/R4 | Verified | `RecoveryScheduler`, `RecoveryTcpServer` (`--recovery-workers`, `--service-delay-us-per-request/event`, `recovery-requests.csv`, saturated-window Jain index), subscriber `--recovery-concurrency K` | `RecoverySchedulerTests`, `LiveReliabilitySchedulerSlow` (`rr_quiet_p99 < fcfs_quiet_p99` by `3.05x`) |
+| **Receive-side & publisher-side deterministic fault injection** | Design 3.7, Audit F14, R2 | Verified | `FaultInjector`, `ImpairmentStage` (`--drop-a`, `--drop-b`, `--corr-loss`, `--dup`, `--reorder`, `--reorder-depth`, `--delay-ms`, `dropped_sequences_hash`) | `FaultInjectorTests`, `ImpairmentStageTests`, `e2e-det-1` |
+| **Multi-process runner, 5 experiment presets, aggregation & plotting** | Audit F3/F14, R4 | Verified | `live_reliability_runner.py`, `experiments.py`, `aggregate.py`, `tools/plot_results.py` | `experiments.py --preset all --size quick` & `tools/plot_results.py` |
+| **PyQt6 Control-Room GUI (`Exchange Control` & `Reliability Experiments`)** | Design 4, Audit F13, R6 | Verified | `exchange_control_panel.py`, `reliability_dashboard.py`, and 7 specialized panels + 6 `pyqtgraph` charts | `tests/gui_smoke_test.py` (`QT_QPA_PLATFORM=offscreen`) |

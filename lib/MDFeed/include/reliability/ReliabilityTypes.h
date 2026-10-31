@@ -17,6 +17,7 @@ struct MarketDataEvent {
     MessageHeader header{};
     FeedId feed_id{FeedId::A};
     std::vector<uint8_t> payload;
+    bool from_recovery{false};
 };
 
 struct MissingRange {

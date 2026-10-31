@@ -107,6 +107,9 @@ class MainWindow(QMainWindow):
         tabs.addTab(self.exchange_control, "Exchange Control")
         self.reliability_dashboard = ReliabilityDashboard(self)
         tabs.addTab(self.reliability_dashboard, "Reliability Experiments")
+        self.exchange_control.open_in_dashboard_requested.connect(
+            lambda path: (tabs.setCurrentWidget(self.reliability_dashboard), self.reliability_dashboard.load_path(path))
+        )
 
     def setup_price_chart(self):
         self.price_chart = pg.PlotWidget(title="Price (USD)")

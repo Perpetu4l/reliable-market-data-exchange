@@ -11,9 +11,11 @@
 #include "reliability/RecoveryTcp.h"
 #include "reliability/BookBuilder.h"
 #include <atomic>
+#include <condition_variable>
 #include <iostream>
 #include <memory>
 #include <map>
+#include <mutex>
 #include <random>
 #include <thread>
 #include <unordered_map>
@@ -40,14 +42,15 @@ private:
     std::unique_ptr<orderentry::OrderEntryServer> order_server_;
     uint16_t order_entry_port_;
 
+    std::thread stats_thread_;
+    std::mutex stats_mutex_;
+    std::condition_variable stats_cv_;
+
     struct ClientOrder {
         long exchange_order_id;
         std::string symbol;
         orderentry::Side side;
     };
-    // Client order ids are only unique within a client connection.  Keep the
-    // file descriptor in the key so two independent clients may both begin at
-    // client_order_id == 1 without overwriting each other's state.
     std::map<std::pair<int, uint64_t>, ClientOrder> client_orders_;
 
     std::random_device rd_;
@@ -86,6 +89,8 @@ private:
         uint64_t executed_qty, uint64_t remaining_qty, orderentry::Side side);
     static void send_response(int client_fd, const void* data, size_t length);
 
+    void stats_loop();
+    void write_requests_csv(const mdfeed::reliability::RecoverySchedulerMetrics& scheduler) const;
     void print_supported_symbols() const;
     void print_final_stats() const;
 };

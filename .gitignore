@@ -4,6 +4,10 @@ cmake-build-release/
 cmake-build-debug-event-trace/
 build/
 build-*/
+build*/
+
+# Test output
+Testing/
 
 # macOS
 .DS_Store

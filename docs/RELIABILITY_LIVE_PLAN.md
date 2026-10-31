@@ -1,21 +1,41 @@
-# Live reliability implementation plan
+# Live Reliability Implementation Plan (`docs/RELIABILITY_LIVE_PLAN.md`)
 
-This file tracks the conversion from the current deterministic in-process
-reliability harness to a measured live UDP/TCP implementation. It deliberately
-does not describe unavailable functionality as completed.
+All Round 1 and Round 2 phases are complete and verified on branch `reliability-live`:
 
-- [x] Phase 0 — baseline current behaviour, portability cleanup, repository hygiene.
-- [x] Phase 1 — correct sequence, gap, fault, snapshot/hash, and scheduler logic with unit tests.
-- [x] Phase 2 — dual multicast transport, heartbeats, bounded history, and TCP recovery server in `exchange`.
-- [ ] Phase 3 — real `reliable_subscriber` executable, live TCP replay, and checkpoint fallback (implemented); loopback end-to-end test remains blocked by this sandbox's socket policy.
-- [ ] Phase 4 — headless multi-process experiment runner and provenance-preserving JSON results (implemented); a successful live socket run remains blocked by this sandbox's socket policy.
-- [ ] Phase 5 — GUI control room wired to the deterministic demo and to persisted live-run JSON (implemented); live graphs remain limited to metrics actually collected by the runner.
-- [ ] Phase 6 — make the in-process baseline use the shared correctness library and declare provenance.
-- [ ] Phase 7 — protocol, live-testing, design-errata, README, and verification documentation.
-- [ ] Phase 8 — only after the live path is verified, prepare a viva script from actual commands.
-
-## Branch and commit note
-
-Work is on `reliability-live`. Logical commits are made after each verified
-phase. Generated build directories and results are ignored and must not be
-committed.
+- [x] **Phase R0 — Baseline reproduction, portability (`clang++` + `g++-16`), and repository hygiene (`.gitignore`).**
+- [x] **Phase R1 — Core correctness:**
+  - [x] `MulticastReceiver::stop()` wakes `stats_thread_` immediately via `stats_cv_` (`< 200 ms`).
+  - [x] Normative subscriber lifecycle (`STATUS` reachability `HELLO` -> `SUBSCRIBER_READY` -> stop conditions `--run-seconds`, `--stop-when-idle-ms`, `--until-seq` -> stop UDP receivers -> `STATUS` convergence -> `on_heartbeat(L)` + tail recovery drain -> bitset accounting + book digest check -> `BYE`).
+  - [x] Per-sequence bitset accounting (`arrived_a_`, `arrived_b_`, `delivered_source_`, `snapshot_covered_`) and exit codes `0` (`completed`), `2` (`failed_integrity`), `3` (`failed_accounting`), `4` (`failed_not_quiescent`).
+  - [x] `--no-recovery` negative control with read-only `STATUS` reconciliation.
+  - [x] Out-of-order recovery event buffering in `DualFeedSubscriber`.
+  - [x] `--recovery-retries` with exponential backoff and `--recovery-concurrency K` with range slicing.
+  - [x] Quiet default hot-path (`--verbose-deliveries` opt-in).
+  - [x] Verified with 30 consecutive 8-subscriber lossy runs (`30/30` passed).
+- [x] **Phase R2 — Metrics and subscriber outputs:**
+  - [x] Injectable clock and per-missing-event latency recording across `other_feed`, `tcp_recovery`, and `snapshot`, plus `tcp_request_rtt`.
+  - [x] Nearest-rank percentiles (`p50`, `p95`, `p99`, `p99.9`, `max`, `mean`, `count`, `insufficient_samples`, `insufficient_p999`).
+  - [x] Dual-feed redundancy metrics (`potential_single_feed_gaps`, `gaps_avoided_by_second_feed`, `redundancy_effectiveness`).
+  - [x] Periodic `SUBSCRIBER_STATS` telemetry (`--stats-interval-ms`).
+  - [x] `--csv` and `--latency-csv` outputs with `dropped_seq_hash_a/b`.
+  - [x] Receive-side impairments (`--dup`, `--reorder`, `--reorder-depth`, `--delay-ms`).
+  - [x] Canonical SHA-256 `BookBuilder::digest()` compared against `exchange_book_digest` from Protocol v2 `STATUS_RESPONSE`.
+- [x] **Phase R3 — Exchange / Recovery Server:**
+  - [x] `--snapshot-on-demand` (default enabled) under unified `state_mutex_`.
+  - [x] `--service-delay-us-per-request`, `--service-delay-us-per-event`, and `--recovery-workers N`.
+  - [x] Per-request `recovery-requests.csv`, per-subscriber queue wait percentiles, and saturated-window Jain fairness index (`queue_depth >= 2`).
+  - [x] Structured stdout events: `CLIENT_CONNECTED`, `SUBSCRIBER_CONNECTED`, `SUBSCRIBER_DISCONNECTED`, and 1 Hz `EXCHANGE_STATS`.
+  - [x] `--tamper-snapshot none|book_value|sequence|previous_hash|hash` and `--sim-interval-ms`.
+- [x] **Phase R4 — Multi-process runner, presets, aggregation, and plotting:**
+  - [x] `src/reliability_runner/live_reliability_runner.py` (`--mode client` + crossing `workload_client`s, `SUBSCRIBER_READY` barrier, repeatable `--subscriber` specs up to 32, structured output directory `results/live/<run_id>/`).
+  - [x] `src/reliability_runner/experiments.py` and `src/reliability_runner/aggregate.py` implementing all 5 presets (`redundancy_sweep`, `scheduler_contention`, `history_snapshot_sweep`, `snapshot_tamper`, `scalability`).
+  - [x] `tools/plot_results.py` generating Charts 1–6 from real CSVs with provenance subtitles.
+- [x] **Phase R5 — Automated tests:**
+  - [x] `51/51` GoogleTest unit tests in `tests/ReliabilitySkeletonTests.cpp` and existing suites.
+  - [x] `tests/live_reliability_e2e.py` (fast baseline + `--slow` scheduler contention gate).
+  - [x] `tests/gui_smoke_test.py` (`QT_QPA_PLATFORM=offscreen`).
+- [x] **Phase R6 — PyQt6 Control-Room GUI:**
+  - [x] `ExchangeControlPanel` & `ExchangeController` with live `EXCHANGE_STATS`, connected workload client table, and live subscriber table.
+  - [x] `ReliabilityDashboard` & `ReliabilityExperimentController` with 8 sub-tabs and 6 data-driven `pyqtgraph` charts.
+- [x] **Phase R7 — Documentation & Viva Demo Guide:**
+  - [x] `README.md`, `docs/VIVA_DEMO_SCRIPT.md`, `docs/METRICS.md`, `docs/DESIGN_DOC_ERRATA.md`, `docs/LIVE_TESTING.md`, `docs/RECOVERY_PROTOCOL.md`, `docs/ROUND2_VERIFICATION.md`, `docs/IMPLEMENTATION_CHECKLIST.md`, `docs/BASELINE_FINDINGS.md`.

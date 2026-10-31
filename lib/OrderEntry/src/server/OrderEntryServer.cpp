@@ -1,6 +1,7 @@
 #include "server/OrderEntryServer.h"
 #include "messages/OrderMessages.h"
 #include <algorithm>
+#include <arpa/inet.h>
 #include <cerrno>
 #include <cstring>
 #include <iostream>
@@ -151,7 +152,16 @@ void OrderEntryServer::handle_client(int client_fd)
                     std::memcpy(&hello, stream_buffer.data() + offset, sizeof(hello));
                     client_id = hello.client_id;
                     send_welcome(client_fd, client_id);
+                    sockaddr_in peer{};
+                    socklen_t peer_len = sizeof(peer);
+                    char ip_buf[64] = "0.0.0.0";
+                    uint16_t peer_port = 0;
+                    if (getpeername(client_fd, reinterpret_cast<sockaddr*>(&peer), &peer_len) == 0) {
+                        inet_ntop(AF_INET, &peer.sin_addr, ip_buf, sizeof(ip_buf));
+                        peer_port = ntohs(peer.sin_port);
+                    }
                     std::cout << "Client " << client_id << " identified on fd=" << client_fd << std::endl;
+                    std::cout << "CLIENT_CONNECTED id=" << client_id << " addr=" << ip_buf << ":" << peer_port << std::endl;
                     offset += header.message_length;
                     continue;
                 }

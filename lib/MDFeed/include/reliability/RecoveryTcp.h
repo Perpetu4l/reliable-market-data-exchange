@@ -4,27 +4,28 @@
 #include "reliability/RecoveryScheduler.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <vector>
 
 namespace mdfeed::reliability {
 
-// A deliberately small TCP transport around RecoveryServer. It uses bounded
-// RecoveryWire framing (including chunked retained-event replies) and one
-// shared scheduler worker, so FCFS and round-robin policies apply across
-// connected subscribers. Authentication, TLS and persistent snapshots remain
-// future work.
 class RecoveryTcpServer {
 public:
     struct Config {
         uint16_t port{9090};
         SchedulingPolicy scheduling_policy{SchedulingPolicy::FCFS};
+        size_t worker_count{1};
+        uint64_t service_delay_us_per_request{0};
+        uint64_t service_delay_us_per_event{0};
+        uint64_t subscriber_idle_timeout_s{10};
     };
 
     struct Stats {
@@ -46,16 +47,25 @@ public:
     [[nodiscard]] uint16_t port() const { return bound_port_; }
     [[nodiscard]] Stats stats() const;
     [[nodiscard]] RecoverySchedulerMetrics scheduler_metrics() const;
+    [[nodiscard]] size_t queue_depth() const { return scheduler_.active_and_pending_count(); }
+    [[nodiscard]] size_t active_subscriber_count();
 
 private:
     struct Connection;
     struct PendingRequest;
+    struct SubscriberSession {
+        std::string address;
+        std::chrono::steady_clock::time_point last_seen;
+    };
 
     void accept_loop();
     void client_loop(std::shared_ptr<Connection> connection);
     void worker_loop();
     bool enqueue_request(std::shared_ptr<Connection> connection, RecoveryRequest request);
     void record_malformed();
+    void touch_subscriber(const std::string& subscriber_id, const std::string& peer_addr);
+    void disconnect_subscriber(const std::string& subscriber_id, const char* reason);
+    void reap_idle_subscribers_locked(std::chrono::steady_clock::time_point now);
 
     Config config_;
     std::shared_ptr<RecoveryServer> recovery_service_;
@@ -65,7 +75,7 @@ private:
     int listen_fd_{-1};
     uint16_t bound_port_{0};
     std::thread accept_thread_;
-    std::thread worker_thread_;
+    std::vector<std::thread> worker_threads_;
     mutable std::mutex connections_mutex_;
     std::vector<std::shared_ptr<Connection>> connections_;
     std::vector<std::thread> client_threads_;
@@ -73,6 +83,8 @@ private:
     std::unordered_map<uint64_t, PendingRequest> pending_requests_;
     mutable std::mutex stats_mutex_;
     Stats stats_;
+    mutable std::mutex subscribers_mutex_;
+    std::unordered_map<std::string, SubscriberSession> active_subscribers_;
 };
 
 class RecoveryTcpClient {
@@ -88,7 +100,9 @@ public:
         const RecoveryRequest& request, std::string& error) const;
     [[nodiscard]] std::optional<RecoveryResponse> request_snapshot(
         uint64_t minimum_sequence, std::string& error) const;
-    [[nodiscard]] std::optional<RecoveryStatusInfo> request_status(std::string& error) const;
+    [[nodiscard]] std::optional<RecoveryStatusInfo> request_status(
+        std::string& error, std::string_view subscriber_id = {}) const;
+    bool send_bye(std::string_view subscriber_id, std::string& error) const;
 
 private:
     Endpoint endpoint_;

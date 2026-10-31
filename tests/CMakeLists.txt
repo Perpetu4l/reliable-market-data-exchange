@@ -22,5 +22,20 @@ if(Python3_Interpreter_FOUND)
             --build-dir ${CMAKE_BINARY_DIR})
     set_tests_properties(LiveReliabilityBaseline PROPERTIES
         SKIP_RETURN_CODE 77
-        TIMEOUT 40)
+        TIMEOUT 120)
+
+    add_test(NAME LiveReliabilitySchedulerSlow
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/live_reliability_e2e.py
+            --build-dir ${CMAKE_BINARY_DIR} --slow)
+    set_tests_properties(LiveReliabilitySchedulerSlow PROPERTIES
+        LABELS "slow"
+        SKIP_RETURN_CODE 77
+        TIMEOUT 240)
+
+    add_test(NAME GuiSmokeTest
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/gui_smoke_test.py
+            --build-dir ${CMAKE_BINARY_DIR})
+    set_tests_properties(GuiSmokeTest PROPERTIES
+        SKIP_RETURN_CODE 77
+        TIMEOUT 90)
 endif()

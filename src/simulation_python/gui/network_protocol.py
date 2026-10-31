@@ -1,8 +1,7 @@
-"""Small Python implementation of the existing packed order-entry protocol.
+"""Small Python implementation of the packed order-entry protocol.
 
-This module is intentionally used only by the GUI manual-testing tab.  It
-opens a real TCP socket to the C++ exchange; it does not call the order book or
-matching engine directly.
+Used by the GUI manual-testing tab. Opens a real TCP socket to the C++
+exchange; never calls the order book or matching engine in-process.
 """
 
 from __future__ import annotations
@@ -16,7 +15,8 @@ from typing import Final
 
 HEADER: Final = struct.Struct("<QIHQI")
 NEW_ORDER: Final = struct.Struct("<QIHQIQQQBBB8s5s")
-CLIENT_HELLO: Final = struct.Struct("<QIHQI Q24s6s".replace(" ", ""))
+CLIENT_HELLO: Final = struct.Struct("<QIHQIQ24s6s")
+EXECUTION_REPORT: Final = struct.Struct("<QIHQIQQQQQQB7s")
 
 NEW_ORDER_TYPE = 1
 ORDER_ACK_TYPE = 4
@@ -78,11 +78,11 @@ def submit_limit_order(
     price_cents: int,
     quantity: int,
     timeout_seconds: float = 3.0,
-) -> tuple[ServerMessage, float]:
+) -> tuple[ServerMessage, float, list[dict[str, int]]]:
     """Handshake and submit one order through the real C++ TCP server.
 
-    The returned latency is client-measured request-to-response RTT in
-    milliseconds, not one-way network latency.
+    Also attempts a brief non-blocking read after ORDER_ACK to capture any
+    immediate EXECUTION_REPORT frames generated when the order crosses.
     """
     with socket.create_connection((host, port), timeout=timeout_seconds) as connection:
         connection.settimeout(timeout_seconds)
@@ -102,7 +102,37 @@ def submit_limit_order(
         )
         started = time.perf_counter_ns()
         connection.sendall(request)
-        while True:
+        primary_response: ServerMessage | None = None
+        rtt_ms = 0.0
+        executions: list[dict[str, int]] = []
+        while primary_response is None:
             response = receive_message(connection)
             if response.message_type in (ORDER_ACK_TYPE, ORDER_REJECT_TYPE):
-                return response, (time.perf_counter_ns() - started) / 1_000_000.0
+                primary_response = response
+                rtt_ms = (time.perf_counter_ns() - started) / 1_000_000.0
+            elif response.message_type == EXECUTION_REPORT_TYPE and len(response.payload) == EXECUTION_REPORT.size:
+                unpacked = EXECUTION_REPORT.unpack(response.payload)
+                executions.append({
+                    "execution_price_cents": unpacked[8],
+                    "execution_quantity": unpacked[9],
+                    "leaves_quantity": unpacked[10],
+                })
+
+        # Briefly check if an execution report immediately followed ORDER_ACK
+        if primary_response.message_type == ORDER_ACK_TYPE:
+            connection.settimeout(0.05)
+            try:
+                while True:
+                    extra = receive_message(connection)
+                    if extra.message_type == EXECUTION_REPORT_TYPE and len(extra.payload) == EXECUTION_REPORT.size:
+                        unpacked = EXECUTION_REPORT.unpack(extra.payload)
+                        executions.append({
+                            "execution_price_cents": unpacked[8],
+                            "execution_quantity": unpacked[9],
+                            "leaves_quantity": unpacked[10],
+                        })
+                    else:
+                        break
+            except (socket.timeout, TimeoutError, ConnectionError, OSError):
+                pass
+        return primary_response, rtt_ms, executions

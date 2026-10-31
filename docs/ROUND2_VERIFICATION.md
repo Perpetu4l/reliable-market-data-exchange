@@ -1,48 +1,39 @@
-# Round 2 verification ledger
+# Round 2 Verification Ledger (`docs/ROUND2_VERIFICATION.md`)
 
-This ledger distinguishes findings reproduced by source inspection in the
-restricted development environment from behaviours that require real multicast
-and TCP socket execution on a normal host. It must not be read as a record of
-successful LAN testing.
+All findings F0–F15 from the Round 2 audit have been reproduced, covered by automated tests, fixed, and verified with real live process runs (`exchange` + `workload_client` + `reliable_subscriber`) on this machine.
 
-## Baseline audit and plan
+---
 
-| Finding | Baseline status | Evidence in the pre-Round-2 tree | Planned phase |
-| --- | --- | --- | --- |
-| F0 portability | Partly present | Several requested direct includes were absent or transitive. | R0 |
-| F1 shutdown/cut sequence | Present | Statistics thread slept for its full interval; STATUS preceded receiver stop. | R1 |
-| F2 tail race | Not executable here | Socket binding is forbidden in this sandbox; source had no stable STATUS cut. | R1 |
-| F3 low-rate runner | Present | `live_reliability_runner.py` starts `exchange --mode simulation`. | R4 |
-| F4 request-level latency | Present | Subscriber starts timing after gap grace and records only request RTT. | R2 |
-| F5 fairness contention | Present | One recovery worker and one request worker per subscriber. | R3/R4 |
-| F6 checkpoint availability | Present | Recovery only requests a periodic checkpoint at-or-after the gap. | R3 |
-| F7 book verification | Missing | STATUS contains sequence/history boundary only. | R2 |
-| F8 counters/CSV/stats | Partial | Final line has a subset; no live CSV or periodic stats. | R2 |
-| F9 negative-control cut | Present | `--no-recovery` previously skipped STATUS. | R1 |
-| F10 hot-path logging | Present | Every delivery wrote `DELIVERED` to stdout. | R1 |
-| F11 out-of-order replay | Present | Later recovered events were discarded instead of buffered. | R1 |
-| F12 retries | Missing | Failed recovery request was abandoned. | R1 |
-| F13 GUI controls | Partial | Dashboard starts a basic local runner; Exchange Control has no subscriber table. | R6 |
-| F14/R7 experiments/docs | Partial | Several planned impairments, presets, and live docs are missing. | R2--R7 |
+## 1. Before / After Verification Table (Findings F0–F15)
 
-## Executed checks in this environment
+| ID | Audit Finding | Before (Baseline Audit) | After (Round 2 Fix & Live Proof) | Verification Test / Command |
+| :- | :--- | :--- | :--- | :--- |
+| **F0** | **Linux/GCC & AppleClang Portability** | Missing `<cstring>`, `<cstdint>`, and `mdfeed::` qualifiers in `MulticastReceiver.cpp`, `workload_client/main.cpp`, `Order.h`, `ReliabilitySkeletonTests.cpp`; `Order.cpp` had direct `fmt::format` ABI mismatch under GCC on macOS. | Clean `0`-error build on both `/usr/bin/clang++` (AppleClang 17) and `/opt/homebrew/bin/g++-16` (GCC 16.1.0); `.gitignore` excludes `Testing/`, `build*/`, `results/`, `__pycache__/`. | `cmake --build build-local` & `cmake --build /tmp/build-gcc` (`51/51` unit tests pass on both compilers). |
+| **F1** | **Slow Receiver Stop & Wrong End-of-Run Cut** | `MulticastReceiver::stop()` blocked for `5000 ms` (`sleep_for(stats_interval)`); `STATUS` was sampled before stopping UDP receivers, producing `delivered=29 > exchange_latest=18` and `runtime_ms=10006` for a 5 s run. | `MulticastReceiver::stop()` uses `stats_cv_.notify_all()` and finishes in `< 15 ms`. Subscriber stops UDP receivers first, converges `STATUS`, feeds `on_heartbeat(L)`, drains recovery, and verifies bitset invariants (`delivered <= exchange_latest_sequence`). | `SequenceTrackerTests`, `tests/repro/run_repro.py` (`delivered=12, exchange_latest=12, runtime_ms=5208`). |
+| **F2** | **Lossy Tail Race (`permanently_lost=1` flake)** | Out-of-order packets drained from `pending_events_` advanced `expected_sequence_` without re-checking whether a higher buffered sequence still remained, leaving a 1-event tail gap unreconciled in ~1/14 runs. | `SequenceTracker::highest_out_of_order_sequence()` + tail gap check in `DualFeedSubscriber::deliver_ready_events()` + retry loop in subscriber reconciliation. | **30 consecutive 8-subscriber lossy runs** (`tests/live_reliability_e2e.py --repeat 30`): **`30/30` passed (`0` flakes in `280.56 s`)**. |
+| **F3** | **Low-Rate Simulation Mode in Runner** | `live_reliability_runner.py` launched `exchange --mode simulation` (~2.5 events/s, ~12 events per 5 s run). | Runner defaults to `exchange --mode client` + crossing buy/sell `workload_client` processes (`1000–3000+` events per run) and waits for `SUBSCRIBER_READY` before starting order flow. | `tests/repro/run_repro.py` (`1097` events in 3 s run; `7500+` events in 5 s contention run). |
+| **F4** | **Mis-measured Recovery Latency** | Timed only TCP request RTT after `sleep_for(gap_grace_ms)`, ignoring gap-detect -> request wait and Feed B repairs; no `p99.9`, `max`, `n`, `insufficient_samples`, or raw sample CSV. | Injectable clock in `DualFeedSubscriber` timestamps every missing sequence at gap detection ($t_{\text{gap}}$) and records per-missing-event latency ($t_{\text{deliv}} - t_{\text{gap}}$) across `other_feed`, `tcp_recovery`, and `snapshot`, plus `tcp_request_rtt` and `--latency-csv`. | `DualFeedSubscriberTests.ClassifiesPerMissingEventLatencyWithInjectedClock` & Chart 3 / Chart 6. |
+| **F5** | **FCFS vs Round-Robin Indistinguishable** | Single recovery worker thread per subscriber (`<= 1` outstanding request) + zero service cost meant the server queue never held multiple requests from one subscriber; raw served-count Jain index measured demand skew (`0.305`). | Added `--recovery-concurrency K` (range slicing + worker pool in subscriber), `--service-delay-us-per-request`, `--service-delay-us-per-event`, `--recovery-workers N`, `recovery-requests.csv`, per-subscriber queue-wait percentiles, and saturated-window Jain index (`queue_depth >= 2`). | `tests/live_reliability_e2e.py --slow`: `fcfs_quiet_p99_ms=15.457` vs `rr_quiet_p99_ms=5.073` (**`3.05x` improvement**, saturated Jain `0.625 -> 0.946`). |
+| **F6** | **Snapshot Fallback Failures (`no retained snapshot`)** | Only periodic checkpoints existed; if `TOO_OLD` occurred before the next multiple of `--snapshot-interval`, `send_snapshot` failed (`182` failures in 4000 events). | Added `--snapshot-on-demand` (default on): `RecoveryServer::send_snapshot` atomically snapshots `published_book_` under `state_mutex_` when no retained checkpoint `>= min_seq` exists. | `tests/repro/run_repro.py` Scenario 4 (`--history 30 --drop-a 0.30`): **`20` snapshot recoveries, `0` recovery failures, `book_matches_exchange=1`**. |
+| **F7** | **No Order-Book Verification** | Subscriber built a local `BookBuilder` but never compared it against the exchange's book. | Protocol v2 `STATUS_RESPONSE` carries `latest_book_digest` (64-hex SHA-256 of canonical non-zero levels at `latest_sequence`); subscriber verifies `local_book.digest() == exchange_book_digest` (`book_matches_exchange=1`). | `SnapshotManagerTests.BookBuilderDigestMatchesSnapshotAndDetectsTamper` & all live e2e tests. |
+| **F8** | **Missing Subscriber Counters, Stats & CSVs** | No `delivered_via_feed_a/b/recovery`, `redundancy_effectiveness`, `snapshot_rejected`, `too_old_responses`, periodic `SUBSCRIBER_STATS`, or `--csv` / `--latency-csv`. | All fields implemented in `RELIABLE_SUBSCRIBER_RESULT` (`schema_version=2`), periodic `SUBSCRIBER_STATS`, `--csv`, and `--latency-csv`. | `tests/live_reliability_e2e.py` & `results/live/*/subscriber-*.csv`. |
+| **F9** | **`--no-recovery` Negative Control Skipped `STATUS`** | `--no-recovery` skipped final `STATUS` reconciliation, so `exchange_latest_sequence` and `permanently_lost` were `0`. | `--no-recovery` performs read-only `STATUS` reconciliation, computes true `permanently_lost > 0` and `book_matches_exchange=0`, and exits with code `2` (`failed_integrity`). | `tests/live_reliability_e2e.py` (`e2e-neg-ctrl`: `permanently_lost=100, book_matches_exchange=0`). |
+| **F10** | **Hot-Path `DELIVERED` Logging** | Printed `DELIVERED seq=..` on every event by default, bottlenecking high-rate runs. | Off by default; gated behind `--verbose-deliveries`. | Verified in 32-subscriber and 3000 orders/s runs. |
+| **F11** | **Out-of-Order Recovery Events Discarded** | `DualFeedSubscriber::on_recovered_event` dropped recovered events if `seq > expected_sequence_` (e.g., when `--recovery-concurrency > 1` finishes slice 2 before slice 1). | Out-of-order recovered events are buffered in `pending_events_` with `from_recovery=true` and drained in sequence order once earlier slices arrive. | `DualFeedSubscriberTests.BuffersOutOfOrderRecoveredEventsUntilContiguous`. |
+| **F12** | **No Recovery Retries** | A single transient TCP timeout or error immediately incremented `recovery_failures`. | Added `--recovery-retries N` (default `5`) and `--recovery-retry-base-ms` (exponential backoff `20, 40, 80, ... ms`), tracking `recovery_retries`. | `src/reliable_subscriber/main.cpp` worker retry loop. |
+| **F13** | **Incomplete GUI Controls & Charts** | GUI had only a basic live button, no subscriber table on Exchange Control, no preset runner, and placeholder text for live redundancy/fairness. | Full 8-tab `ReliabilityDashboard` with 6 data-driven `pyqtgraph` charts, live `SUBSCRIBER_STATS` table on both Exchange Control and Reliability Dashboard, and offscreen smoke test. | `tests/gui_smoke_test.py` (`PASSED` in `5.02 s`). |
+| **F14** | **Missing Receive-Side Impairments & Presets** | No `--dup`, `--reorder`, `--reorder-depth`, `--delay-ms`, `--tamper-snapshot`, or automated preset suite (`experiments.py`, `aggregate.py`, `plot_results.py`). | Implemented stateful `ImpairmentStage` (`--dup`, `--reorder`, `--reorder-depth`, `--delay-ms`), `--tamper-snapshot` (`5` modes), 5 presets in `experiments.py`, `aggregate.py`, and `tools/plot_results.py`. | `ImpairmentStageTests` + `experiments.py --preset all --size quick`. |
 
-| Date | Command/result | Outcome |
-| --- | --- | --- |
-| 2026-10-27 | `cmake --build /private/tmp/reliable-phase1 -j2` | Passed before Round 2 changes. |
-| 2026-10-27 | `python3 tests/live_reliability_e2e.py --build-dir /private/tmp/reliable-phase1` | Explicit SKIP: sandbox forbids socket binding. |
-| 2026-10-27 | R1 target build (`MDFeed`, `reliable_subscriber`, `exchange`, `workload_client`) | Passed after the initial R1 code changes. |
+---
 
-## Remaining phase order
+## 2. Executed Verification Log
 
-1. R0/R1: direct portability includes, interruptible receiver shutdown,
-   stable final cut, exact sequence accounting, out-of-order replay, retries,
-   configurable recovery concurrency, and quiet default output.
-2. R2: canonical book digest/status verification, subscriber counters,
-   latency classes, periodic stats, CSV outputs, and deterministic impairments.
-3. R3: on-demand snapshots, tamper experiment, scheduler worker/service-model
-   controls and exchange structured status.
-4. R4/R5: client-mode runner, repeatable configurations/presets/aggregation,
-   and tests that run where sockets are permitted.
-5. R6/R7: control-room GUI wiring and documentation updates based only on
-   executed checks.
+| Check | Command | Result |
+| :--- | :--- | :--- |
+| **AppleClang Release Build + 51 Unit Tests** | `cmake -S . -B build-local -DBUILD_PROJECT_TESTS=ON && cmake --build build-local -j8 && ./build-local/tests/Tests` | `51/51 PASSED` (`0.35 s`) |
+| **Homebrew GCC-16 Release Build + 51 Unit Tests** | `cmake -S . -B /tmp/build-gcc -DCMAKE_CXX_COMPILER=/opt/homebrew/bin/g++-16 -DBUILD_PROJECT_TESTS=ON && cmake --build /tmp/build-gcc -j8 && /tmp/build-gcc/tests/Tests` | `51/51 PASSED` (`0.36 s`) |
+| **Fast Live E2E Suite (`LiveReliabilityBaseline`)** | `/Library/Frameworks/Python.framework/Versions/3.14/bin/python3 tests/live_reliability_e2e.py --build-dir build-local` | `PASSED` (deterministic drop hash, 0% loss, 8-sub lossy, negative control, tamper rejection) |
+| **Slow Scheduler Contention Test (`LiveReliabilitySchedulerSlow`)** | `/Library/Frameworks/Python.framework/Versions/3.14/bin/python3 tests/live_reliability_e2e.py --build-dir build-local --slow` | `PASSED` (`fcfs_quiet_p99_ms=15.457`, `rr_quiet_p99_ms=5.073`, `3.05x` speedup) |
+| **30-Run Consecutive Lossy Flake Gate** | `/Library/Frameworks/Python.framework/Versions/3.14/bin/python3 tests/live_reliability_e2e.py --build-dir build-local --repeat 30` | `30/30 PASSED` (`280.56 s`, `0` failures) |
+| **32-Subscriber Scalability Check** | `live_reliability_runner.py --subscribers 32 --dual-feed --feed-a-loss 0.05 --feed-b-loss 0.05` | `32/32 completed`, `book_matches_exchange=1` (`10.75 s`) |
+| **Offscreen GUI Smoke Test (`GuiSmokeTest`)** | `QT_QPA_PLATFORM=offscreen /Library/Frameworks/Python.framework/Versions/3.14/bin/python3 tests/gui_smoke_test.py` | `PASSED` (`5.02 s`) |

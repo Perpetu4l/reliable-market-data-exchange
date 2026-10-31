@@ -17,21 +17,27 @@ struct PublisherConfig {
     std::chrono::microseconds spin_duration{100};
     size_t ring_buffer_size = 65536;
     // Number of published (non-heartbeat) market-data messages retained for
-    // subscriber-initiated TCP recovery.  Zero disables in-memory recovery.
+    // subscriber-initiated TCP recovery. Zero disables in-memory recovery.
     size_t recovery_history_events = 65536;
     uint64_t snapshot_interval_events = 0;
     size_t snapshot_retention_count = 8;
-    // TCP recovery is enabled when this is non-zero. It is intentionally a
-    // separate endpoint from order entry because recovery clients have a
-    // different framed protocol.
+    bool snapshot_on_demand = true;
+    // TCP recovery is enabled when this is non-zero.
     uint16_t recovery_port = 9090;
     std::string recovery_scheduling_policy{"fcfs"};
-    // Deterministic application-layer withholding for live experiments. These
-    // are not operating-system or physical-network packet-loss measurements.
+    size_t recovery_workers = 1;
+    uint64_t service_delay_us_per_request = 0;
+    uint64_t service_delay_us_per_event = 0;
+    uint64_t subscriber_idle_timeout_s = 10;
+    std::string tamper_snapshot{"none"};
+    uint64_t sim_interval_ms = 200;
+    std::string results_dir{};
+    std::string run_id{};
+    std::string requests_csv_path{};
+    // Deterministic application-layer withholding for live experiments.
     double feed_a_loss_rate{0.0};
     double feed_b_loss_rate{0.0};
     double correlated_loss_rate{0.0};
     uint64_t fault_random_seed{42};
 };
 }
-

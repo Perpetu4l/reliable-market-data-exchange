@@ -29,6 +29,10 @@ public:
     [[nodiscard]] uint64_t expected_sequence() const { return expected_sequence_; }
     [[nodiscard]] uint64_t duplicate_count() const { return duplicate_count_; }
     [[nodiscard]] uint64_t gap_count() const { return gap_count_; }
+    [[nodiscard]] std::optional<uint64_t> highest_out_of_order_sequence() const {
+        if (out_of_order_sequences_.empty()) return std::nullopt;
+        return *out_of_order_sequences_.rbegin();
+    }
     // Market-data sequences are global and begin at one. Starting from the
     // first datagram silently loses a dropped head-of-stream event.
     void reset(uint64_t next_expected = 1);

@@ -1,13 +1,8 @@
-# Recovery TCP protocol
+# Recovery TCP Protocol Specification (Version 2)
 
-Status: the exchange hosts this listener when `--recovery-port` is non-zero
-(default `9090`), `recovery_client` is a command-line request client, and
-`reliable_subscriber` invokes it after a live UDP sequence gap. TCP snapshot
-transfer is implemented for in-memory composite checkpoints. There is no
-persistent store, authentication, encryption, or snapshot catch-up replay yet.
+Status: **Implemented and Verified (`PROTOCOL_VERSION = 2`)**. The exchange hosts this TCP listener when `--recovery-port` is non-zero (default `9090`). `recovery_client` provides a CLI verification utility, and `reliable_subscriber` uses this protocol for initial `STATUS_REQUEST` reachability (`HELLO`), gap replay (`RECOVERY_REQUEST`), checkpoint fallback (`SNAPSHOT_REQUEST`), end-of-run quiescence and SHA-256 book-digest reconciliation (`STATUS_REQUEST`), and clean session termination (`BYE`).
 
-Recovery traffic uses TCP independently from order entry. The default port is
-`9090`. A TCP stream contains one or more frames:
+Recovery traffic runs over TCP independently of the TCP order-entry port (`8080`) and UDP multicast feeds (`239.1.1.1:9999` and `239.1.1.2:10000`). Every TCP stream carries length-prefixed binary frames:
 
 ```text
 u32 big-endian frame_payload_length
@@ -15,23 +10,25 @@ u8  message_type
 ... type-specific payload
 ```
 
-The length excludes the four-byte prefix, includes the type byte, and is
-limited to 1 MiB. Receivers retain partial input until a whole frame arrives;
-invalid lengths or unknown types are rejected rather than allocating arbitrary
-memory.
+`frame_payload_length` excludes the 4-byte length prefix, includes the 1-byte `message_type`, and is bounded by `MAX_FRAME_PAYLOAD_LENGTH = 1048576` (1 MiB). Partial reads are buffered until a complete frame arrives; oversized or unknown frame types are rejected immediately without unbounded memory allocation.
 
-| Type | Value | Status |
-| --- | ---: | --- |
-| `RECOVERY_REQUEST` | 1 | Implemented and accepted by the exchange listener |
-| `RECOVERY_RESPONSE` | 2 | Implemented for retained-event replies |
-| `SNAPSHOT_REQUEST` | 3 | Implemented |
-| `SNAPSHOT_RESPONSE` | 4 | Implemented for in-memory checkpoints |
-| `STATUS_REQUEST` | 5 | Implemented |
-| `STATUS_RESPONSE` | 6 | Implemented |
-| `RECOVERY_CHUNK` | 7 | Implemented when an OK replay exceeds one bounded frame |
-| `RECOVERY_COMPLETE` | 8 | Implemented terminator for a chunked replay |
+## Frame Type Summary
 
-## Recovery request
+| Type | Value | Direction | Status |
+| :--- | ---: | :--- | :--- |
+| `RECOVERY_REQUEST` | `1` | Subscriber -> Exchange | Implemented (`subscriber_id`, `start_sequence`, `end_sequence`) |
+| `RECOVERY_RESPONSE` | `2` | Exchange -> Subscriber | Implemented (`OK`, `TOO_OLD`, `BAD_REQUEST`, `ERROR` + raw events) |
+| `SNAPSHOT_REQUEST` | `3` | Subscriber -> Exchange | Implemented (`minimum_sequence`) |
+| `SNAPSHOT_RESPONSE` | `4` | Exchange -> Subscriber | Implemented (composite SHA-256 checkpoint + on-demand snapshot creation) |
+| `STATUS_REQUEST` | `5` | Subscriber -> Exchange | Implemented (carries optional `subscriber_id` for session registration) |
+| `STATUS_RESPONSE` | `6` | Exchange -> Subscriber | Implemented (Protocol v2: `protocol_version`, `latest_sequence`, `history_minimum_sequence`, `latest_book_digest`) |
+| `RECOVERY_CHUNK` | `7` | Exchange -> Subscriber | Implemented (streamed chunk when replay exceeds 1 MiB) |
+| `RECOVERY_COMPLETE` | `8` | Exchange -> Subscriber | Implemented (terminator frame after `RECOVERY_CHUNK` stream) |
+| `BYE` | `9` | Subscriber -> Exchange | Implemented (Protocol v2: explicit subscriber session disconnect) |
+
+---
+
+## 1. `RECOVERY_REQUEST` (`type = 1`)
 
 ```text
 u16 subscriber_id_length
@@ -40,13 +37,12 @@ u64 start_sequence
 u64 end_sequence
 ```
 
-Sequences are global and inclusive. Empty IDs, zero start sequences, and
-inverted ranges are invalid.
+Sequences are 1-based, global across all instruments, and inclusive (`1 <= start_sequence <= end_sequence`). Empty `subscriber_id`, zero `start_sequence`, or inverted ranges (`start_sequence > end_sequence`) return `BAD_REQUEST`.
 
-## Recovery response
+## 2. `RECOVERY_RESPONSE` (`type = 2`), `RECOVERY_CHUNK` (`type = 7`), `RECOVERY_COMPLETE` (`type = 8`)
 
 ```text
-u8  status                 # OK, TOO_OLD, BAD_REQUEST, ERROR
+u8  status                 # 0=OK, 1=TOO_OLD, 2=NOT_AVAILABLE, 3=BAD_REQUEST, 4=ERROR
 u32 event_count
 repeat event_count:
   u32 original_event_length
@@ -55,32 +51,20 @@ u16 detail_length
 bytes detail (UTF-8)
 ```
 
-The event bytes are the original binary market-data datagrams, preserving the
-existing packed `MessageHeader`; recovery does not translate or replace the
-market-data protocol. A successful replay that exceeds one MiB is split into
-`RECOVERY_CHUNK` frames, each carrying the exact payload format above, followed
-by an empty `RECOVERY_COMPLETE` frame. The client concatenates chunks before
-returning the logical response. A single oversized event is rejected with an
-explicit `ERROR` rather than silently truncated.
+Each event payload is the exact binary market-data datagram (`MessageHeader` + body) originally published on UDP multicast. When a replay exceeds `1 MiB`, the server splits the events across multiple `RECOVERY_CHUNK` (`type = 7`) frames (each formatted identically to `RECOVERY_RESPONSE`), followed by an empty `RECOVERY_COMPLETE` (`type = 8`) frame.
 
-## Snapshot request and response
+## 3. `SNAPSHOT_REQUEST` (`type = 3`) and `SNAPSHOT_RESPONSE` (`type = 4`)
 
-A snapshot request has one field:
-
+### Request (`type = 3`)
 ```text
 u64 minimum_sequence
 ```
 
-The exchange returns the earliest retained checkpoint at or after that
-sequence. Returning an earlier checkpoint would leave an unreplayed portion of
-the requested gap and is therefore unsafe. A successful response contains the
-checkpoint sequence, timestamp, its SHA-256 hash-chain fields, and each
-absolute price level:
-
+### Response (`type = 4`)
 ```text
 u8  status
 u64 checkpoint_sequence
-u32 snapshot_instrument_id       # 0 for a composite multi-instrument snapshot
+u32 snapshot_instrument_id       # 0 for composite multi-instrument snapshot
 u64 timestamp_ns
 u32 level_count
 repeat level_count:
@@ -88,49 +72,37 @@ repeat level_count:
   u64 price_in_cents
   u64 aggregate_quantity
   u8  side                       # BUY=1, SELL=2
-u16 previous_hash_length; bytes previous_hash
-u16 hash_length;          bytes hash
-u16 detail_length;        bytes detail
+u16 previous_hash_length; bytes previous_hash (hex SHA-256)
+u16 hash_length;          bytes hash (hex SHA-256)
+u16 detail_length;        bytes detail (UTF-8)
 ```
 
-`reliable_subscriber` verifies the checkpoint hash, applies its absolute price
-levels to its local market-data book, and only then advances sequence
-continuity. A bad hash is a recovery failure, not a successful resync.
+With `--snapshot-on-demand` enabled (default on in `exchange`), if no periodic checkpoint has `checkpoint_sequence >= minimum_sequence` and the exchange has already published at or past `minimum_sequence`, `RecoveryServer::send_snapshot` atomically constructs and chains a new composite checkpoint from `published_book_` under `state_mutex_`. `reliable_subscriber` verifies `SnapshotHasher::verify(snapshot)` before applying levels to its local `BookBuilder`.
 
-## Scheduling and service counters
+## 4. `STATUS_REQUEST` (`type = 5`) and `STATUS_RESPONSE` (`type = 6`) — Protocol v2
 
-`--recovery-policy fcfs` serves retained-event requests in arrival order;
-`--recovery-policy round-robin` rotates among subscriber identities with
-pending requests. At clean shutdown the exchange prints measured
-connection/request/response counts, recovered-message count, per-subscriber
-service count, queue-wait average/max, and a Jain scheduler-service fairness
-index. Snapshot requests currently bypass this fairness queue and are handled
-by the connection handler. These counters measure the shared recovery worker;
-they must not be interpreted as network delivery fairness.
+### Request (`type = 5`)
+```text
+# Legacy empty payload (0 bytes) OR Protocol v2 payload:
+u16 subscriber_id_length
+bytes subscriber_id (UTF-8)
+```
+When `subscriber_id` is non-empty, the exchange records or refreshes the subscriber session and prints `SUBSCRIBER_CONNECTED id=<id> addr=<ip:port>` on first sight.
 
-## Status reconciliation
+### Response (`type = 6`, Protocol v2)
+```text
+u8  protocol_version             # 2
+u64 latest_sequence
+u64 history_minimum_sequence
+u16 latest_book_digest_length
+bytes latest_book_digest         # 64-char lowercase hex SHA-256 of canonical BookBuilder state at latest_sequence
+```
+`RecoveryServer::record_published_event` updates `history_`, `published_book_`, and periodic `snapshots_` under a single `state_mutex_`, so `latest_sequence` and `latest_book_digest` in `STATUS_RESPONSE` always describe the exact same point in the published stream.
 
-`STATUS_REQUEST` has an empty payload. `STATUS_RESPONSE` is two big-endian
-`u64` values: `latest_sequence` and `history_minimum_sequence`. At the end of
-a timed subscriber run, `reliable_subscriber` requests this status and feeds
-`latest_sequence` through its heartbeat gap detector before shutdown. A status
-failure is reported as `failed_integrity`, rather than silently accepting a
-possibly lost stream tail. The subscriber then drains already queued recovery
-work before emitting its result. It reports individual deliveries separately
-from the contiguous range covered by any verified snapshot and calculates
-`permanently_lost` against `latest_sequence`; a non-zero value is an integrity
-failure, not a successful experiment result.
-
-## Controlled live loss experiments
-
-The exchange can withhold outbound **application messages** deterministically:
+## 5. `BYE` (`type = 9`) — Protocol v2
 
 ```text
---feed-a-loss RATE --feed-b-loss RATE --fault-seed N
---correlated-loss RATE --fault-seed N
+u16 subscriber_id_length
+bytes subscriber_id (UTF-8)
 ```
-
-Independent Feed A/B rates use distinct deterministic streams; correlated loss
-uses one decision for both feeds. These controls run before multicast socket
-sends, preserve the authoritative recovery history, and never drop heartbeats.
-They are not evidence of OS-level or physical-network packet loss.
+Sent by `reliable_subscriber` after final `STATUS` reconciliation. The exchange removes the subscriber from its active session table and emits `SUBSCRIBER_DISCONNECTED id=<id> reason=bye`. Sessions that stop sending traffic for more than 5 seconds without a `BYE` frame are reaped with `SUBSCRIBER_DISCONNECTED id=<id> reason=timeout`.

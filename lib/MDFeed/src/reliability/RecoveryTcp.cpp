@@ -1,9 +1,11 @@
 #include "reliability/RecoveryTcp.h"
 #include "reliability/RecoveryWire.h"
 
+#include <algorithm>
 #include <arpa/inet.h>
 #include <cerrno>
 #include <cstring>
+#include <iostream>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -28,11 +30,29 @@ void close_socket(const int fd)
         close(fd);
     }
 }
+
+uint64_t now_steady_ns()
+{
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+const char* status_to_string(const RecoveryStatus status)
+{
+    switch (status) {
+    case RecoveryStatus::OK: return "OK";
+    case RecoveryStatus::TOO_OLD: return "TOO_OLD";
+    case RecoveryStatus::BAD_REQUEST: return "BAD_REQUEST";
+    case RecoveryStatus::ERROR: return "ERROR";
+    }
+    return "ERROR";
+}
 } // namespace
 
 struct RecoveryTcpServer::Connection {
-    explicit Connection(const int socket_fd) : fd(socket_fd) {}
+    Connection(const int socket_fd, std::string peer) : fd(socket_fd), peer_addr(std::move(peer)) {}
     int fd;
+    std::string peer_addr;
     std::atomic<bool> open{true};
     std::mutex write_mutex;
 };
@@ -42,7 +62,10 @@ struct RecoveryTcpServer::PendingRequest {
 };
 
 RecoveryTcpServer::RecoveryTcpServer(Config config, std::shared_ptr<RecoveryServer> recovery_service)
-    : config_(config), recovery_service_(std::move(recovery_service)), scheduler_(config_.scheduling_policy) {}
+    : config_(config), recovery_service_(std::move(recovery_service)), scheduler_(config_.scheduling_policy)
+{
+    if (config_.worker_count == 0) config_.worker_count = 1;
+}
 
 RecoveryTcpServer::~RecoveryTcpServer()
 {
@@ -75,7 +98,7 @@ bool RecoveryTcpServer::start(std::string& error)
         listen_fd_ = -1;
         return false;
     }
-    if (listen(listen_fd_, 32) < 0) {
+    if (listen(listen_fd_, 64) < 0) {
         error = std::string("could not listen for recovery clients: ") + std::strerror(errno);
         close_socket(listen_fd_);
         listen_fd_ = -1;
@@ -87,7 +110,10 @@ bool RecoveryTcpServer::start(std::string& error)
         bound_port_ = ntohs(bound.sin_port);
     }
     running_.store(true);
-    worker_thread_ = std::thread(&RecoveryTcpServer::worker_loop, this);
+    worker_threads_.reserve(config_.worker_count);
+    for (size_t i = 0; i < config_.worker_count; ++i) {
+        worker_threads_.emplace_back(&RecoveryTcpServer::worker_loop, this);
+    }
     accept_thread_ = std::thread(&RecoveryTcpServer::accept_loop, this);
     return true;
 }
@@ -110,7 +136,10 @@ void RecoveryTcpServer::stop()
         if (thread.joinable()) thread.join();
     }
     client_threads_.clear();
-    if (worker_thread_.joinable()) worker_thread_.join();
+    for (auto& worker : worker_threads_) {
+        if (worker.joinable()) worker.join();
+    }
+    worker_threads_.clear();
     {
         std::lock_guard lock(pending_mutex_);
         pending_requests_.clear();
@@ -129,6 +158,51 @@ RecoverySchedulerMetrics RecoveryTcpServer::scheduler_metrics() const
     return scheduler_.metrics();
 }
 
+void RecoveryTcpServer::touch_subscriber(const std::string& subscriber_id, const std::string& peer_addr)
+{
+    if (subscriber_id.empty()) return;
+    std::lock_guard lock(subscribers_mutex_);
+    const auto now = std::chrono::steady_clock::now();
+    reap_idle_subscribers_locked(now);
+    const auto [it, inserted] = active_subscribers_.emplace(
+        subscriber_id, SubscriberSession{peer_addr, now});
+    if (inserted) {
+        std::cout << "SUBSCRIBER_CONNECTED id=" << subscriber_id << " addr=" << peer_addr << std::endl;
+    } else {
+        it->second.last_seen = now;
+    }
+}
+
+void RecoveryTcpServer::disconnect_subscriber(const std::string& subscriber_id, const char* reason)
+{
+    if (subscriber_id.empty()) return;
+    std::lock_guard lock(subscribers_mutex_);
+    if (active_subscribers_.erase(subscriber_id) > 0) {
+        std::cout << "SUBSCRIBER_DISCONNECTED id=" << subscriber_id << " reason=" << reason << std::endl;
+    }
+}
+
+void RecoveryTcpServer::reap_idle_subscribers_locked(const std::chrono::steady_clock::time_point now)
+{
+    if (config_.subscriber_idle_timeout_s == 0) return;
+    const auto timeout = std::chrono::seconds(config_.subscriber_idle_timeout_s);
+    for (auto it = active_subscribers_.begin(); it != active_subscribers_.end();) {
+        if (now - it->second.last_seen > timeout) {
+            std::cout << "SUBSCRIBER_DISCONNECTED id=" << it->first << " reason=timeout" << std::endl;
+            it = active_subscribers_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+size_t RecoveryTcpServer::active_subscriber_count()
+{
+    std::lock_guard lock(subscribers_mutex_);
+    reap_idle_subscribers_locked(std::chrono::steady_clock::now());
+    return active_subscribers_.size();
+}
+
 void RecoveryTcpServer::accept_loop()
 {
     while (running_.load()) {
@@ -139,7 +213,11 @@ void RecoveryTcpServer::accept_loop()
             if (running_.load()) continue;
             break;
         }
-        auto connection = std::make_shared<Connection>(fd);
+        char ip_buf[64] = "0.0.0.0";
+        inet_ntop(AF_INET, &peer.sin_addr, ip_buf, sizeof(ip_buf));
+        std::string peer_addr = std::string(ip_buf) + ":" + std::to_string(ntohs(peer.sin_port));
+
+        auto connection = std::make_shared<Connection>(fd, std::move(peer_addr));
         {
             std::lock_guard lock(connections_mutex_);
             connections_.push_back(connection);
@@ -182,6 +260,9 @@ void RecoveryTcpServer::client_loop(std::shared_ptr<Connection> connection)
                         "snapshot response exceeds the maximum frame size"};
                     payload = RecoveryWireCodec::encode_snapshot_response(response);
                 }
+                if (response.status == RecoveryStatus::OK) {
+                    recovery_service_->add_snapshot_bytes_sent(payload.size());
+                }
                 const auto response_frame = RecoveryWireCodec::frame(
                     RecoveryWireType::SNAPSHOT_RESPONSE, payload);
                 bool sent = false;
@@ -195,9 +276,13 @@ void RecoveryTcpServer::client_loop(std::shared_ptr<Connection> connection)
                 continue;
             }
             if (frame->type == RecoveryWireType::STATUS_REQUEST) {
-                if (!frame->payload.empty()) {
+                const auto sub_id = RecoveryWireCodec::decode_status_request(frame->payload, error);
+                if (!sub_id) {
                     record_malformed();
                     continue;
+                }
+                if (!sub_id->empty()) {
+                    touch_subscriber(*sub_id, connection->peer_addr);
                 }
                 const auto response_frame = RecoveryWireCodec::frame(RecoveryWireType::STATUS_RESPONSE,
                     RecoveryWireCodec::encode_status_response(recovery_service_->status()));
@@ -211,6 +296,15 @@ void RecoveryTcpServer::client_loop(std::shared_ptr<Connection> connection)
                 else ++stats_.send_failures;
                 continue;
             }
+            if (frame->type == RecoveryWireType::BYE) {
+                const auto sub_id = RecoveryWireCodec::decode_bye(frame->payload, error);
+                if (!sub_id) {
+                    record_malformed();
+                    continue;
+                }
+                disconnect_subscriber(*sub_id, "bye");
+                continue;
+            }
             if (frame->type != RecoveryWireType::RECOVERY_REQUEST) {
                 record_malformed();
                 continue;
@@ -220,6 +314,7 @@ void RecoveryTcpServer::client_loop(std::shared_ptr<Connection> connection)
                 record_malformed();
                 continue;
             }
+            touch_subscriber(request->subscriber_id, connection->peer_addr);
             if (!enqueue_request(connection, *request)) break;
         }
     }
@@ -246,24 +341,37 @@ bool RecoveryTcpServer::enqueue_request(std::shared_ptr<Connection> connection, 
 void RecoveryTcpServer::worker_loop()
 {
     while (const auto scheduled = scheduler_.wait_next()) {
+        const auto started_tp = std::chrono::steady_clock::now();
+        const uint64_t started_ns = now_steady_ns();
+        const uint64_t queue_wait_ns = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+            started_tp - scheduled->enqueued_at).count());
+
         PendingRequest pending;
         {
             std::lock_guard lock(pending_mutex_);
             const auto it = pending_requests_.find(scheduled->request.request_id);
-            if (it == pending_requests_.end()) continue;
+            if (it == pending_requests_.end()) {
+                scheduler_.record_completed(*scheduled, 0, queue_wait_ns, "CANCELLED", started_ns, now_steady_ns());
+                continue;
+            }
             pending = std::move(it->second);
             pending_requests_.erase(it);
         }
         auto response = recovery_service_->request_missing_data(scheduled->request);
+        const uint64_t n_events = response.status == RecoveryStatus::OK ? response.events.size() : 0;
+
+        // Modelled server capacity delay (explicitly recorded in results).
+        const uint64_t delay_us = config_.service_delay_us_per_request
+            + config_.service_delay_us_per_event * n_events;
+        if (delay_us > 0) {
+            std::this_thread::sleep_for(std::chrono::microseconds(delay_us));
+        }
+
         auto payload = RecoveryWireCodec::encode_response(response);
         std::vector<std::vector<uint8_t>> frames;
         if (payload.size() + 1 <= RecoveryWireCodec::MAX_FRAME_BYTES) {
             frames.push_back(RecoveryWireCodec::frame(RecoveryWireType::RECOVERY_RESPONSE, payload));
         } else if (response.status == RecoveryStatus::OK && !response.events.empty()) {
-            // Preserve the one-megabyte framing bound without silently
-            // truncating an otherwise retained range. Chunks carry ordinary
-            // recovery-response payloads; the empty COMPLETE frame defines
-            // the end of this logical response.
             std::vector<MarketDataEvent> chunk;
             bool event_too_large = false;
             for (const auto& event : response.events) {
@@ -319,10 +427,13 @@ void RecoveryTcpServer::worker_loop()
                 }
             }
         }
-        const auto queue_wait_ns = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now() - scheduled->enqueued_at).count());
+        const uint64_t finished_ns = now_steady_ns();
         scheduler_.record_completed(*scheduled,
-            response.status == RecoveryStatus::OK ? response.events.size() : 0, queue_wait_ns);
+            response.status == RecoveryStatus::OK ? response.events.size() : 0,
+            queue_wait_ns,
+            status_to_string(response.status),
+            started_ns,
+            finished_ns);
         std::lock_guard lock(stats_mutex_);
         if (sent) ++stats_.responses_sent;
         else ++stats_.send_failures;
@@ -483,7 +594,8 @@ std::optional<RecoveryResponse> RecoveryTcpClient::request_snapshot(
     }
 }
 
-std::optional<RecoveryStatusInfo> RecoveryTcpClient::request_status(std::string& error) const
+std::optional<RecoveryStatusInfo> RecoveryTcpClient::request_status(
+    std::string& error, const std::string_view subscriber_id) const
 {
     error.clear();
     const auto fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -502,7 +614,10 @@ std::optional<RecoveryStatusInfo> RecoveryTcpClient::request_status(std::string&
         close_socket(fd);
         return std::nullopt;
     }
-    const auto bytes = RecoveryWireCodec::frame(RecoveryWireType::STATUS_REQUEST, {});
+    const auto payload = subscriber_id.empty()
+        ? std::vector<uint8_t>{}
+        : RecoveryWireCodec::encode_status_request(subscriber_id);
+    const auto bytes = RecoveryWireCodec::frame(RecoveryWireType::STATUS_REQUEST, payload);
     if (!send_all(fd, bytes)) { error = "could not send status request"; close_socket(fd); return std::nullopt; }
     std::vector<uint8_t> stream;
     uint8_t buffer[4096];
@@ -520,6 +635,40 @@ std::optional<RecoveryStatusInfo> RecoveryTcpClient::request_status(std::string&
         close_socket(fd);
         return result;
     }
+}
+
+bool RecoveryTcpClient::send_bye(const std::string_view subscriber_id, std::string& error) const
+{
+    error.clear();
+    if (subscriber_id.empty()) {
+        error = "subscriber id must not be empty";
+        return false;
+    }
+    const auto fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) {
+        error = "could not create recovery client socket";
+        return false;
+    }
+    timeval timeout{};
+    timeout.tv_sec = static_cast<time_t>(endpoint_.timeout_ms / 1000);
+    timeout.tv_usec = static_cast<suseconds_t>((endpoint_.timeout_ms % 1000) * 1000);
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(endpoint_.port);
+    if (inet_pton(AF_INET, endpoint_.host.c_str(), &address.sin_addr) != 1
+        || connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) < 0) {
+        error = "could not connect to recovery endpoint";
+        close_socket(fd);
+        return false;
+    }
+    const auto bytes = RecoveryWireCodec::frame(
+        RecoveryWireType::BYE, RecoveryWireCodec::encode_bye(subscriber_id));
+    const bool ok = send_all(fd, bytes);
+    if (!ok) error = "could not send bye frame";
+    close_socket(fd);
+    return ok;
 }
 
 } // namespace mdfeed::reliability

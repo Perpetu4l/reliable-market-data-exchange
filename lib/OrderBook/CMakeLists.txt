@@ -16,4 +16,9 @@ set(SOURCE_FILES
 
 add_library(OrderBook STATIC ${SOURCE_FILES} ${HEADER_FILES})
 target_include_directories(OrderBook PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(OrderBook MDFeed spdlog::spdlog)
+if (APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_definitions(OrderBook PUBLIC SPDLOG_USE_STD_FORMAT)
+    target_link_libraries(OrderBook MDFeed spdlog::spdlog_header_only)
+else ()
+    target_link_libraries(OrderBook MDFeed spdlog::spdlog)
+endif ()

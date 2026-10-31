@@ -1,26 +1,54 @@
 #include "reliability/Metrics.h"
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
+#include <numeric>
 
 namespace mdfeed::reliability {
 namespace {
-uint64_t percentile(std::vector<uint64_t> values, const double fraction)
+uint64_t nearest_rank_sorted(const std::vector<uint64_t>& sorted_values, const double fraction)
 {
-    if (values.empty()) return 0;
+    if (sorted_values.empty()) return 0;
+    if (fraction <= 0.0) return sorted_values.front();
+    if (fraction >= 1.0) return sorted_values.back();
+    const auto rank = static_cast<size_t>(std::ceil(fraction * static_cast<double>(sorted_values.size())));
+    const auto index = std::clamp<size_t>(rank == 0 ? 0 : rank - 1, 0, sorted_values.size() - 1);
+    return sorted_values[index];
+}
+} // namespace
+
+LatencySummary compute_latency_summary(std::vector<uint64_t> values)
+{
+    LatencySummary summary{};
+    summary.count = values.size();
+    summary.insufficient_samples = values.size() < 100;
+    summary.insufficient_p999 = values.size() < 1000;
+    if (values.empty()) return summary;
     std::sort(values.begin(), values.end());
-    const auto index = static_cast<size_t>(fraction * static_cast<double>(values.size() - 1));
-    return values[index];
+    summary.p50_ns = nearest_rank_sorted(values, 0.50);
+    summary.p95_ns = nearest_rank_sorted(values, 0.95);
+    summary.p99_ns = nearest_rank_sorted(values, 0.99);
+    summary.p999_ns = nearest_rank_sorted(values, 0.999);
+    summary.max_ns = values.back();
+    unsigned __int128 sum = 0;
+    for (const auto v : values) sum += v;
+    summary.mean_ns = static_cast<uint64_t>(sum / values.size());
+    return summary;
 }
+
+void MetricsCollector::record_recovery_latency(const uint64_t nanoseconds)
+{
+    recovery_latencies_.push_back(nanoseconds);
 }
-void MetricsCollector::record_recovery_latency(const uint64_t nanoseconds) { recovery_latencies_.push_back(nanoseconds); }
+
 SystemMetrics MetricsCollector::snapshot() const
 {
     auto result = metrics_;
-    result.recovery_latency = {percentile(recovery_latencies_, .50), percentile(recovery_latencies_, .95),
-        percentile(recovery_latencies_, .99), percentile(recovery_latencies_, .999), percentile(recovery_latencies_, 1.0)};
+    result.recovery_latency = compute_latency_summary(recovery_latencies_);
     return result;
 }
+
 bool MetricsExporter::export_csv(const SystemMetrics& metrics, const std::filesystem::path& path) const
 {
     std::ofstream output(path);

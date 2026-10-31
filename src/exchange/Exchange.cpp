@@ -1,9 +1,29 @@
 #include "Exchange.h"
+#include "reliability/Metrics.h"
 #include <utility>
 #include <sys/socket.h>
 #include <cstring>
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <sstream>
+
+namespace {
+uint64_t compute_jain_ppm(const std::unordered_map<std::string, uint64_t>& counts)
+{
+    if (counts.empty()) return 0;
+    unsigned __int128 total = 0;
+    unsigned __int128 sum_of_squares = 0;
+    for (const auto& [_, count] : counts) {
+        total += count;
+        sum_of_squares += static_cast<unsigned __int128>(count) * count;
+    }
+    if (sum_of_squares == 0) return 0;
+    return static_cast<uint64_t>(
+        (static_cast<long double>(total) * static_cast<long double>(total) * 1'000'000.0L)
+        / (static_cast<long double>(counts.size()) * static_cast<long double>(sum_of_squares)));
+}
+} // namespace
 
 Exchange::Exchange(const Mode mode, mdfeed::PublisherConfig md_config, const uint16_t oe_port)
     : mode_(mode), running_(false), md_config_(std::move(md_config)),
@@ -17,29 +37,33 @@ Exchange::Exchange(const Mode mode, mdfeed::PublisherConfig md_config, const uin
         mdfeed::reliability::SnapshotConfig{md_config_.snapshot_interval_events,
             md_config_.snapshot_retention_count, md_config_.snapshot_interval_events != 0});
     market_data_book_builder_ = std::make_shared<mdfeed::reliability::BookBuilder>();
+    const auto tamper_mode = mdfeed::reliability::parse_tamper_mode(md_config_.tamper_snapshot)
+        .value_or(mdfeed::reliability::TamperMode::NONE);
     recovery_service_ = std::make_shared<mdfeed::reliability::RecoveryServer>(
-        recovery_history_, snapshot_manager_);
+        recovery_history_, snapshot_manager_, market_data_book_builder_,
+        md_config_.snapshot_on_demand, tamper_mode);
     if (md_config_.recovery_port != 0) {
         recovery_tcp_server_ = std::make_unique<mdfeed::reliability::RecoveryTcpServer>(
-            mdfeed::reliability::RecoveryTcpServer::Config{md_config_.recovery_port,
+            mdfeed::reliability::RecoveryTcpServer::Config{
+                md_config_.recovery_port,
                 md_config_.recovery_scheduling_policy == "round-robin"
                     ? mdfeed::reliability::SchedulingPolicy::ROUND_ROBIN
-                    : mdfeed::reliability::SchedulingPolicy::FCFS}, recovery_service_);
+                    : mdfeed::reliability::SchedulingPolicy::FCFS,
+                md_config_.recovery_workers,
+                md_config_.service_delay_us_per_request,
+                md_config_.service_delay_us_per_event,
+                md_config_.subscriber_idle_timeout_s},
+            recovery_service_);
     }
     multicast_thread_ = std::make_unique<
         mdfeed::MulticastPublisherThread>(md_publisher_->get_ring_buffer(), md_config_,
-            [history = recovery_history_, snapshots = snapshot_manager_, books = market_data_book_builder_]
-            (const mdfeed::MessageBuffer& buffer) {
+            [service = recovery_service_](const mdfeed::MessageBuffer& buffer) {
                 if (buffer.length < sizeof(mdfeed::MessageHeader)) return;
                 mdfeed::reliability::MarketDataEvent event;
                 std::memcpy(&event.header, buffer.data, sizeof(event.header));
                 event.payload.assign(reinterpret_cast<const uint8_t*>(buffer.data),
                     reinterpret_cast<const uint8_t*>(buffer.data) + buffer.length);
-                history->append(event);
-                if (books->apply(event) && snapshots->should_checkpoint(event.header.sequence_number)) {
-                    snapshots->store_snapshot(snapshots->create_snapshot(event.header.sequence_number,
-                        0, books->all_levels(), event.header.timestamp_ns));
-                }
+                service->record_published_event(event);
             });
 
     symbol_manager_ = std::make_unique<SymbolManager>(*md_publisher_);
@@ -52,6 +76,10 @@ Exchange::Exchange(const Mode mode, mdfeed::PublisherConfig md_config, const uin
 bool Exchange::start()
 {
     if (running_.load()) return true;
+    if (recovery_service_->tamper_mode() != mdfeed::reliability::TamperMode::NONE) {
+        std::cout << "TAMPER_ACTIVE mode="
+                  << mdfeed::reliability::tamper_mode_name(recovery_service_->tamper_mode()) << std::endl;
+    }
     std::cout << "Starting Multicast Publisher Thread..." << std::endl;
     if (!multicast_thread_->start()) {
         std::cerr << "Failed to start multicast publisher thread" << std::endl;
@@ -78,6 +106,7 @@ bool Exchange::start()
     }
 
     running_.store(true);
+    stats_thread_ = std::thread(&Exchange::stats_loop, this);
 
     if (mode_ == Mode::SIMULATION) {
         std::cout << "Exchange started in SIMULATION mode" << std::endl;
@@ -93,9 +122,10 @@ bool Exchange::start()
 
 void Exchange::stop()
 {
-    if (!running_.load()) return;
+    if (!running_.exchange(false)) return;
     std::cout << "Stopping Enhanced Exchange..." << std::endl;
-    running_.store(false);
+    stats_cv_.notify_all();
+    if (stats_thread_.joinable()) stats_thread_.join();
     if (order_server_) { order_server_->stop(); }
     if (recovery_tcp_server_) { recovery_tcp_server_->stop(); }
     if (multicast_thread_) { multicast_thread_->stop(); }
@@ -113,6 +143,30 @@ void Exchange::run()
         client_order_loop();
     }
     stop();
+}
+
+void Exchange::stats_loop()
+{
+    std::unique_lock lock(stats_mutex_);
+    while (running_.load()) {
+        if (stats_cv_.wait_for(lock, std::chrono::seconds(1), [this] { return !running_.load(); })) {
+            break;
+        }
+        lock.unlock();
+        const auto status = recovery_service_->status();
+        const auto md_stats = multicast_thread_->get_stats();
+        const size_t q_depth = recovery_tcp_server_ ? recovery_tcp_server_->queue_depth() : 0;
+        const size_t subs = recovery_tcp_server_ ? recovery_tcp_server_->active_subscriber_count() : 0;
+        const auto ts_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        std::cout << "EXCHANGE_STATS latest_seq=" << status.latest_sequence
+                  << " history_min=" << status.history_minimum_sequence
+                  << " queue_depth=" << q_depth
+                  << " subscribers=" << subs
+                  << " md_sent=" << md_stats.messages_sent
+                  << " ts=" << ts_ns << std::endl;
+        lock.lock();
+    }
 }
 
 void Exchange::initialize_simulation_books()
@@ -151,6 +205,7 @@ void Exchange::initialize_simulation_books()
 void Exchange::simulation_loop()
 {
     const auto symbols = symbol_manager_->get_all_symbols();
+    const auto interval = std::chrono::milliseconds(std::max<uint64_t>(1, md_config_.sim_interval_ms));
     while (running_.load()) {
         if (symbols.empty()) break;
 
@@ -159,7 +214,7 @@ void Exchange::simulation_loop()
         auto symbol_id = symbol_manager_->get_symbol_id(symbol);
         if (!order_book || !symbol_id) continue;
         simulate_trading_activity(order_book, *symbol_id, symbol);
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        std::this_thread::sleep_for(interval);
     }
 }
 
@@ -237,6 +292,10 @@ void Exchange::client_order_loop()
             std::this_thread::sleep_for(std::chrono::microseconds(100));
         }
     }
+    // Drain any orders remaining in the buffer before final shutdown.
+    while (order_server_ && order_server_->get_order_buffer()->pop(order_buffer)) {
+        process_client_order(order_buffer);
+    }
 }
 
 void Exchange::process_client_order(const orderentry::OrderBuffer& buffer)
@@ -268,14 +327,8 @@ void Exchange::handle_new_order(const orderentry::OrderBuffer& buffer)
     const auto* msg = buffer.as<orderentry::NewOrderMessage>();
     const std::string symbol(msg->symbol, strnlen(msg->symbol, sizeof(msg->symbol)));
 
-    std::cout << "[CLIENT] New order: " << msg->client_order_id << " " << symbol
-            << " " << (msg->side == orderentry::Side::BUY ? "BUY" : "SELL")
-            << " " << msg->quantity << " @ $" << (msg->price / 100.0) << std::endl;
-
     if (!symbol_manager_->is_valid_symbol(symbol)) {
-        std::cerr << "Rejecting order: Unknown symbol " << symbol << std::endl;
-        send_order_reject(buffer.client_fd, msg->client_order_id, 1,
-            "Unknown symbol");
+        send_order_reject(buffer.client_fd, msg->client_order_id, 1, "Unknown symbol");
         return;
     }
 
@@ -296,10 +349,6 @@ void Exchange::handle_new_order(const orderentry::OrderBuffer& buffer)
     const OrderCore core(username, *symbol_id);
     const Order order(core, msg->price, msg->quantity, msg->side == orderentry::Side::BUY);
 
-    // Capture the best resting price before matching removes the level. This
-    // permits the incoming client to receive an execution report for the
-    // common one-level case; the order-book API does not yet expose a full
-    // per-fill execution ledger for reporting every resting counterparty.
     const auto potential_execution_price = msg->side == orderentry::Side::BUY
         ? order_book->GetBestAskPrice()
         : order_book->GetBestBidPrice();
@@ -328,12 +377,9 @@ void Exchange::handle_cancel_order(const orderentry::OrderBuffer& buffer)
 {
     const auto* msg = buffer.as<orderentry::CancelOrderMessage>();
 
-    std::cout << "[CLIENT] Cancel order: " << msg->client_order_id
-            << " (original: " << msg->original_client_order_id << ")" << std::endl;
-
     const auto it = client_orders_.find({buffer.client_fd, msg->original_client_order_id});
     if (it == client_orders_.end()) {
-        send_order_reject(buffer.client_fd, msg->client_order_id, 3, "Order not found"); // TODO, use reject enum
+        send_order_reject(buffer.client_fd, msg->client_order_id, 3, "Order not found");
         return;
     }
 
@@ -348,13 +394,10 @@ void Exchange::handle_cancel_order(const orderentry::OrderBuffer& buffer)
 
     try {
         order_book->RemoveOrder(exchange_order_id);
-
         client_orders_.erase(it);
-
         send_order_ack(buffer.client_fd, msg->client_order_id, exchange_order_id, symbol);
-        std::cout << "Order " << msg->original_client_order_id << " cancelled successfully" << std::endl;
     }
-    catch (const std::exception& e) {
+    catch (const std::exception&) {
         send_order_reject(buffer.client_fd, msg->client_order_id, 5, "Cancel failed");
     }
 }
@@ -466,6 +509,43 @@ void Exchange::send_response(const int client_fd, const void* data, const size_t
     }
 }
 
+void Exchange::write_requests_csv(const mdfeed::reliability::RecoverySchedulerMetrics& scheduler) const
+{
+    std::filesystem::path target_path;
+    if (!md_config_.requests_csv_path.empty()) {
+        target_path = md_config_.requests_csv_path;
+    } else if (!md_config_.results_dir.empty()) {
+        std::filesystem::path dir(md_config_.results_dir);
+        std::error_code ec;
+        std::filesystem::create_directories(dir, ec);
+        target_path = dir / "recovery-requests.csv";
+    }
+    if (target_path.empty()) return;
+
+    if (target_path.has_parent_path()) {
+        std::error_code ec;
+        std::filesystem::create_directories(target_path.parent_path(), ec);
+    }
+    std::ofstream out(target_path);
+    if (!out) {
+        std::cerr << "Failed to write recovery-requests.csv to " << target_path << std::endl;
+        return;
+    }
+    out << "subscriber_id,range_start,range_end,n_events,status,policy,enqueued_ns,started_ns,finished_ns,queue_depth_at_enqueue\n";
+    for (const auto& entry : scheduler.request_log) {
+        out << entry.subscriber_id << ','
+            << entry.range_start << ','
+            << entry.range_end << ','
+            << entry.n_events << ','
+            << entry.status << ','
+            << entry.policy << ','
+            << entry.enqueued_ns << ','
+            << entry.started_ns << ','
+            << entry.finished_ns << ','
+            << entry.queue_depth_at_enqueue << '\n';
+    }
+}
+
 void Exchange::print_supported_symbols() const
 {
     const auto symbols = symbol_manager_->get_all_symbols();
@@ -480,6 +560,7 @@ void Exchange::print_supported_symbols() const
 void Exchange::print_final_stats() const
 {
     const auto stats = multicast_thread_->get_stats();
+    const auto final_status = recovery_service_->status();
     uint64_t recovery_connections = 0;
     uint64_t recovery_requests = 0;
     uint64_t recovery_responses = 0;
@@ -488,7 +569,12 @@ void Exchange::print_final_stats() const
     uint64_t recovery_max_wait = 0;
     uint64_t recovery_subscribers = 0;
     uint64_t recovery_fairness_jain_ppm = 0;
+    uint64_t recovery_fairness_saturated_jain_ppm = 0;
     std::string recovery_service_distribution{"none"};
+    std::string wait_p50_str{"none"};
+    std::string wait_p99_str{"none"};
+    std::string wait_max_str{"none"};
+
     std::cout << "\n=== FINAL EXCHANGE STATISTICS ===" << std::endl;
     std::cout << "Market Data Messages sent: " << stats.messages_sent << std::endl;
     std::cout << "Market Data Send failures: " << stats.send_failures << std::endl;
@@ -497,16 +583,18 @@ void Exchange::print_final_stats() const
               << stats.feed_b_app_dropped << std::endl;
 
     if (order_server_) {
-        const auto stats = order_server_->get_stats();
-        std::cout << "Order Entry Orders received: " << stats.orders_received << std::endl;
-        std::cout << "Order Entry Total connections: " << stats.connections << std::endl;
-        std::cout << "Order Entry malformed frames: " << stats.malformed_messages << std::endl;
-        std::cout << "Order Entry queue overflows: " << stats.queue_overflows << std::endl;
+        const auto oe_stats = order_server_->get_stats();
+        std::cout << "Order Entry Orders received: " << oe_stats.orders_received << std::endl;
+        std::cout << "Order Entry Total connections: " << oe_stats.connections << std::endl;
+        std::cout << "Order Entry malformed frames: " << oe_stats.malformed_messages << std::endl;
+        std::cout << "Order Entry queue overflows: " << oe_stats.queue_overflows << std::endl;
     }
 
     if (recovery_tcp_server_) {
         const auto recovery = recovery_tcp_server_->stats();
         const auto scheduler = recovery_tcp_server_->scheduler_metrics();
+        write_requests_csv(scheduler);
+
         const auto average_wait = scheduler.recovery_request_count == 0 ? 0
             : scheduler.total_queue_wait_ns / scheduler.recovery_request_count;
         recovery_connections = recovery.connections;
@@ -516,28 +604,44 @@ void Exchange::print_final_stats() const
         recovery_average_wait = average_wait;
         recovery_max_wait = scheduler.max_queue_wait_ns;
         recovery_subscribers = scheduler.per_subscriber_service_distribution.size();
+        recovery_fairness_jain_ppm = compute_jain_ppm(scheduler.per_subscriber_service_distribution);
+        recovery_fairness_saturated_jain_ppm = compute_jain_ppm(
+            scheduler.saturated_window_service_distribution.empty()
+                ? scheduler.per_subscriber_service_distribution
+                : scheduler.saturated_window_service_distribution);
+
         if (!scheduler.per_subscriber_service_distribution.empty()) {
             std::vector<std::pair<std::string, uint64_t>> served(
                 scheduler.per_subscriber_service_distribution.begin(),
                 scheduler.per_subscriber_service_distribution.end());
             std::sort(served.begin(), served.end());
-            uint64_t total = 0;
-            uint64_t sum_of_squares = 0;
             std::ostringstream encoded;
+            std::ostringstream p50_oss;
+            std::ostringstream p99_oss;
+            std::ostringstream max_oss;
             for (size_t index = 0; index < served.size(); ++index) {
-                total += served[index].second;
-                sum_of_squares += served[index].second * served[index].second;
-                if (index != 0) encoded << ',';
-                encoded << served[index].first << ':' << served[index].second;
+                if (index != 0) {
+                    encoded << ',';
+                    p50_oss << ',';
+                    p99_oss << ',';
+                    max_oss << ',';
+                }
+                const auto& sub_id = served[index].first;
+                encoded << sub_id << ':' << served[index].second;
+                std::vector<uint64_t> waits;
+                if (const auto it = scheduler.per_subscriber_queue_waits_ns.find(sub_id);
+                    it != scheduler.per_subscriber_queue_waits_ns.end()) {
+                    waits = it->second;
+                }
+                const auto w_summary = mdfeed::reliability::compute_latency_summary(std::move(waits));
+                p50_oss << sub_id << ':' << w_summary.p50_ns;
+                p99_oss << sub_id << ':' << w_summary.p99_ns;
+                max_oss << sub_id << ':' << w_summary.max_ns;
             }
             recovery_service_distribution = encoded.str();
-            // Scheduler-service fairness only; this is not a claim about
-            // network delivery fairness. Scale Jain's index for parsing.
-            if (sum_of_squares != 0) {
-                recovery_fairness_jain_ppm = static_cast<uint64_t>(
-                    (static_cast<long double>(total) * total * 1'000'000.0L)
-                    / (static_cast<long double>(served.size()) * sum_of_squares));
-            }
+            wait_p50_str = p50_oss.str();
+            wait_p99_str = p99_oss.str();
+            wait_max_str = max_oss.str();
         }
         std::cout << "Recovery TCP connections: " << recovery.connections << std::endl;
         std::cout << "Recovery TCP requests/responses: " << recovery.requests_received << '/'
@@ -548,10 +652,16 @@ void Exchange::print_final_stats() const
                   << scheduler.messages_recovered << std::endl;
         std::cout << "Recovery queue wait avg/max ns: " << average_wait << '/'
                   << scheduler.max_queue_wait_ns << std::endl;
+        std::cout << "Recovery per-subscriber queue wait p50 ns: " << wait_p50_str << std::endl;
+        std::cout << "Recovery per-subscriber queue wait p99 ns: " << wait_p99_str << std::endl;
+        std::cout << "Recovery per-subscriber queue wait max ns: " << wait_max_str << std::endl;
         std::cout << "Recovery subscribers served: "
                   << scheduler.per_subscriber_service_distribution.size() << std::endl;
         std::cout << "Recovery service distribution: " << recovery_service_distribution
-                  << " (Jain fairness ppm " << recovery_fairness_jain_ppm << ")" << std::endl;
+                  << " (raw Jain ppm=" << recovery_fairness_jain_ppm
+                  << ", saturated-window Jain ppm=" << recovery_fairness_saturated_jain_ppm
+                  << "; note: Jain on served counts reflects demand imbalance; primary fairness metric is per-subscriber queue wait)"
+                  << std::endl;
     }
 
     for (const auto symbols = symbol_manager_->get_all_symbols();
@@ -568,6 +678,8 @@ void Exchange::print_final_stats() const
               << " feed_a_app_dropped=" << stats.feed_a_app_dropped
               << " feed_b_app_dropped=" << stats.feed_b_app_dropped
               << " md_send_failures=" << stats.send_failures
+              << " latest_sequence=" << final_status.latest_sequence
+              << " latest_book_digest=" << final_status.latest_book_digest
               << " recovery_connections=" << recovery_connections
               << " recovery_requests=" << recovery_requests
               << " recovery_responses=" << recovery_responses
@@ -576,7 +688,17 @@ void Exchange::print_final_stats() const
               << " recovery_max_queue_wait_ns=" << recovery_max_wait
               << " recovery_subscribers=" << recovery_subscribers
               << " recovery_fairness_jain_ppm=" << recovery_fairness_jain_ppm
+              << " recovery_fairness_saturated_jain_ppm=" << recovery_fairness_saturated_jain_ppm
               << " recovery_service_distribution=" << recovery_service_distribution
+              << " per_subscriber_wait_p50_ns=" << wait_p50_str
+              << " per_subscriber_wait_p99_ns=" << wait_p99_str
+              << " per_subscriber_wait_max_ns=" << wait_max_str
               << " snapshots_retained=" << snapshot_manager_->snapshot_count()
+              << " on_demand_snapshots=" << recovery_service_->on_demand_snapshots_created()
+              << " snapshot_bytes_sent=" << recovery_service_->snapshot_bytes_sent()
+              << " recovery_workers=" << md_config_.recovery_workers
+              << " service_delay_us_per_request=" << md_config_.service_delay_us_per_request
+              << " service_delay_us_per_event=" << md_config_.service_delay_us_per_event
+              << " tamper_mode=" << mdfeed::reliability::tamper_mode_name(recovery_service_->tamper_mode())
               << '\n';
 }

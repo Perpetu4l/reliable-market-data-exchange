@@ -3,6 +3,7 @@
 #include <csignal>
 #include <iostream>
 #include <memory>
+#include <string>
 
 namespace {
     std::unique_ptr<Exchange> exchange;
@@ -14,41 +15,49 @@ namespace {
         if (exchange) { exchange->stop(); }
         exit(0);
     }
+
+    bool parse_bool_flag(const std::string& value, bool& out)
+    {
+        if (value == "1" || value == "true" || value == "on" || value == "yes") { out = true; return true; }
+        if (value == "0" || value == "false" || value == "off" || value == "no") { out = false; return true; }
+        return false;
+    }
 } // namespace
 
 void print_usage(const char* program_name)
 {
     std::cout << "Usage: " << program_name << " [options]\n";
     std::cout << "Options:\n";
-    std::cout << "  --mode <mode>            Exchange mode: 'simulation' or "
-                 "'client' (default: simulation)\n";
-    std::cout << "  --md-ip <address>        Market data multicast IP "
-                 "(default: 239.1.1.1)\n";
-    std::cout << "  --md-port <port>         Market data multicast port "
-                 "(default: 9999)\n";
-    std::cout << "  --md-interface <ip>      Market data interface IP "
-                 "(default: 127.0.0.1)\n";
-    std::cout << "  --dual-feed              Publish the same event stream on Feed A and Feed B\n";
-    std::cout << "  --feed-b-ip <address>    Feed B multicast IP (default: 239.1.1.2)\n";
-    std::cout << "  --feed-b-port <port>     Feed B multicast port (default: 10000)\n";
-    std::cout << "  --heartbeat-ms <ms>      Market-data heartbeat interval (default: 1000)\n";
-    std::cout << "  --history <events>       Events retained for recovery (default: 65536; 0 disables)\n";
-    std::cout << "  --snapshot-interval <N>  Create composite snapshot every N events (0 disables)\n";
-    std::cout << "  --snapshot-retention <N> Number of snapshots retained (default: 8)\n";
-    std::cout << "  --recovery-port <port>   Recovery TCP port (default: 9090; 0 disables)\n";
-    std::cout << "  --recovery-policy <name> Recovery scheduler: fcfs|round-robin (default: fcfs)\n";
-    std::cout << "  --feed-a-loss <rate>     Application-layer loss rate for Feed A [0,1]\n";
-    std::cout << "  --feed-b-loss <rate>     Application-layer loss rate for Feed B [0,1]\n";
-    std::cout << "  --correlated-loss <rate> Application-layer loss applied to both feeds [0,1]\n";
-    std::cout << "  --fault-seed <N>         Deterministic live fault seed (default: 42)\n";
-    std::cout << "  --oe-port <port>         Order entry TCP port (default: "
-                 "8080, client mode only)\n";
-    std::cout << "  --help, -h               Show this help message\n";
-    std::cout << "\nModes:\n";
-    std::cout << "  simulation              Generate synthetic trading "
-                 "activity\n";
-    std::cout << "  client                  Accept orders from TCP clients\n";
-    std::cout << "\nSupported Symbols: AAPL, GOOGL, AMZN, NFLX, META\n";
+    std::cout << "  --mode <mode>                          Exchange mode: 'simulation' or 'client' (default: simulation)\n";
+    std::cout << "  --sim-interval-ms <ms>                 Simulation order interval in ms (default: 200)\n";
+    std::cout << "  --md-ip <address>                      Market data multicast IP (default: 239.1.1.1)\n";
+    std::cout << "  --md-port <port>                       Market data multicast port (default: 9999)\n";
+    std::cout << "  --md-interface <ip>                    Market data interface IP (default: 127.0.0.1)\n";
+    std::cout << "  --dual-feed                            Publish the same event stream on Feed A and Feed B\n";
+    std::cout << "  --feed-b-ip <address>                  Feed B multicast IP (default: 239.1.1.2)\n";
+    std::cout << "  --feed-b-port <port>                   Feed B multicast port (default: 10000)\n";
+    std::cout << "  --heartbeat-ms <ms>                    Market-data heartbeat interval (default: 1000)\n";
+    std::cout << "  --history <events>                     Events retained for recovery (default: 65536; 0 disables)\n";
+    std::cout << "  --snapshot-interval <N>                Create composite snapshot every N events (0 disables)\n";
+    std::cout << "  --snapshot-retention <N>               Number of snapshots retained (default: 8)\n";
+    std::cout << "  --snapshot-on-demand [0|1|true|false]  Create on-demand snapshot if none retained (default: on)\n";
+    std::cout << "  --no-snapshot-on-demand                Disable on-demand snapshot creation\n";
+    std::cout << "  --tamper-snapshot <mode>               none|book_value|sequence|previous_hash|hash (default: none)\n";
+    std::cout << "  --recovery-port <port>                 Recovery TCP port (default: 9090; 0 disables)\n";
+    std::cout << "  --recovery-policy <name>               Recovery scheduler: fcfs|round-robin (default: fcfs)\n";
+    std::cout << "  --recovery-workers <N>                 Number of recovery worker threads (default: 1)\n";
+    std::cout << "  --service-delay-us-per-request <us>    Modelled server capacity delay per request (default: 0)\n";
+    std::cout << "  --service-delay-us-per-event <us>      Modelled server capacity delay per replayed event (default: 0)\n";
+    std::cout << "  --subscriber-idle-timeout-s <sec>      Subscriber idle disconnect timeout (default: 10)\n";
+    std::cout << "  --results-dir <dir>                    Directory to write recovery-requests.csv\n";
+    std::cout << "  --run-id <id>                          Experiment run identifier\n";
+    std::cout << "  --requests-csv <path>                  Explicit path for recovery-requests.csv\n";
+    std::cout << "  --feed-a-loss <rate>                   Application-layer loss rate for Feed A [0,1]\n";
+    std::cout << "  --feed-b-loss <rate>                   Application-layer loss rate for Feed B [0,1]\n";
+    std::cout << "  --correlated-loss <rate>               Application-layer loss applied to both feeds [0,1]\n";
+    std::cout << "  --fault-seed <N>                       Deterministic live fault seed (default: 42)\n";
+    std::cout << "  --oe-port <port>                       Order entry TCP port (default: 8080, client mode only)\n";
+    std::cout << "  --help, -h                             Show this help message\n";
 }
 
 int main(const int argc, char* argv[])
@@ -61,7 +70,8 @@ int main(const int argc, char* argv[])
     uint16_t oe_port = 8080;
 
     for (int i = 1; i < argc; ++i) {
-        if (std::string arg = argv[i]; arg == "--mode" && i + 1 < argc) {
+        std::string arg = argv[i];
+        if (arg == "--mode" && i + 1 < argc) {
             if (std::string mode_str = argv[++i]; mode_str == "simulation") {
                 mode = Exchange::Mode::SIMULATION;
             }
@@ -74,12 +84,14 @@ int main(const int argc, char* argv[])
                 return 1;
             }
         }
+        else if (arg == "--sim-interval-ms" && i + 1 < argc) {
+            md_config.sim_interval_ms = std::stoull(argv[++i]);
+        }
         else if (arg == "--md-ip" && i + 1 < argc) {
             md_config.multicast_ip = argv[++i];
         }
         else if (arg == "--md-port" && i + 1 < argc) {
-            md_config.multicast_port
-                    = static_cast<uint16_t>(std::stoul(argv[++i]));
+            md_config.multicast_port = static_cast<uint16_t>(std::stoul(argv[++i]));
         }
         else if (arg == "--md-interface" && i + 1 < argc) {
             md_config.interface_ip = argv[++i];
@@ -105,6 +117,28 @@ int main(const int argc, char* argv[])
         else if (arg == "--snapshot-retention" && i + 1 < argc) {
             md_config.snapshot_retention_count = std::stoull(argv[++i]);
         }
+        else if (arg == "--snapshot-on-demand") {
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                bool parsed = true;
+                if (!parse_bool_flag(argv[++i], parsed)) {
+                    std::cerr << "Invalid boolean for --snapshot-on-demand\n";
+                    return 1;
+                }
+                md_config.snapshot_on_demand = parsed;
+            } else {
+                md_config.snapshot_on_demand = true;
+            }
+        }
+        else if (arg == "--no-snapshot-on-demand") {
+            md_config.snapshot_on_demand = false;
+        }
+        else if (arg == "--tamper-snapshot" && i + 1 < argc) {
+            md_config.tamper_snapshot = argv[++i];
+            if (!mdfeed::reliability::parse_tamper_mode(md_config.tamper_snapshot).has_value()) {
+                std::cerr << "Invalid tamper mode: " << md_config.tamper_snapshot << std::endl;
+                return 1;
+            }
+        }
         else if (arg == "--recovery-port" && i + 1 < argc) {
             md_config.recovery_port = static_cast<uint16_t>(std::stoul(argv[++i]));
         }
@@ -115,6 +149,27 @@ int main(const int argc, char* argv[])
                 std::cerr << "Invalid recovery policy: " << md_config.recovery_scheduling_policy << std::endl;
                 return 1;
             }
+        }
+        else if (arg == "--recovery-workers" && i + 1 < argc) {
+            md_config.recovery_workers = std::max<size_t>(1, std::stoull(argv[++i]));
+        }
+        else if (arg == "--service-delay-us-per-request" && i + 1 < argc) {
+            md_config.service_delay_us_per_request = std::stoull(argv[++i]);
+        }
+        else if (arg == "--service-delay-us-per-event" && i + 1 < argc) {
+            md_config.service_delay_us_per_event = std::stoull(argv[++i]);
+        }
+        else if (arg == "--subscriber-idle-timeout-s" && i + 1 < argc) {
+            md_config.subscriber_idle_timeout_s = std::stoull(argv[++i]);
+        }
+        else if (arg == "--results-dir" && i + 1 < argc) {
+            md_config.results_dir = argv[++i];
+        }
+        else if (arg == "--run-id" && i + 1 < argc) {
+            md_config.run_id = argv[++i];
+        }
+        else if (arg == "--requests-csv" && i + 1 < argc) {
+            md_config.requests_csv_path = argv[++i];
         }
         else if (arg == "--feed-a-loss" && i + 1 < argc) {
             md_config.feed_a_loss_rate = std::stod(argv[++i]);
@@ -151,8 +206,7 @@ int main(const int argc, char* argv[])
 
     std::cout << "=== ENHANCED EXCHANGE ===" << std::endl;
     std::cout << "Mode: "
-              << (mode == Exchange::Mode::SIMULATION ? "SIMULATION"
-                                                     : "CLIENT_ORDERS")
+              << (mode == Exchange::Mode::SIMULATION ? "SIMULATION" : "CLIENT_ORDERS")
               << std::endl;
     std::cout << "Market Data: " << md_config.multicast_ip << ":"
               << md_config.multicast_port << std::endl;
@@ -160,11 +214,15 @@ int main(const int argc, char* argv[])
     std::cout << "Recovery history: " << md_config.recovery_history_events
               << " events" << std::endl;
     std::cout << "Snapshot interval: " << md_config.snapshot_interval_events
-              << " events; retention: " << md_config.snapshot_retention_count << std::endl;
+              << " events; retention: " << md_config.snapshot_retention_count
+              << "; on-demand: " << (md_config.snapshot_on_demand ? "on" : "off") << std::endl;
     std::cout << "Recovery TCP: "
               << (md_config.recovery_port == 0 ? "disabled" : std::to_string(md_config.recovery_port))
               << std::endl;
-    std::cout << "Recovery scheduling policy: " << md_config.recovery_scheduling_policy << std::endl;
+    std::cout << "Recovery scheduling policy: " << md_config.recovery_scheduling_policy
+              << " (workers=" << md_config.recovery_workers
+              << ", delay_us_per_req=" << md_config.service_delay_us_per_request
+              << ", delay_us_per_event=" << md_config.service_delay_us_per_event << ")" << std::endl;
     std::cout << "Application-layer feed loss A/B/correlated: " << md_config.feed_a_loss_rate << '/'
               << md_config.feed_b_loss_rate << '/' << md_config.correlated_loss_rate
               << " (seed " << md_config.fault_random_seed << ")" << std::endl;

@@ -6,6 +6,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace mdfeed::reliability {
@@ -25,6 +26,7 @@ enum class RecoveryWireType : uint8_t {
     // empty payload. Error replies remain a single RECOVERY_RESPONSE.
     RECOVERY_CHUNK = 7,
     RECOVERY_COMPLETE = 8,
+    BYE = 9,
 };
 
 struct RecoveryWireFrame {
@@ -35,6 +37,8 @@ struct RecoveryWireFrame {
 class RecoveryWireCodec {
 public:
     static constexpr uint32_t MAX_FRAME_BYTES = 1024 * 1024;
+    static constexpr uint8_t PROTOCOL_VERSION = 2;
+
     [[nodiscard]] static std::vector<uint8_t> frame(RecoveryWireType type, std::span<const uint8_t> payload);
     // Consumes exactly one complete frame from `stream`; incomplete input
     // returns nullopt, whereas malformed input populates `error`.
@@ -53,8 +57,19 @@ public:
     [[nodiscard]] static std::vector<uint8_t> encode_snapshot_response(const RecoveryResponse& response);
     [[nodiscard]] static std::optional<RecoveryResponse> decode_snapshot_response(
         std::span<const uint8_t> payload, std::string& error);
-    [[nodiscard]] static std::vector<uint8_t> encode_status_response(RecoveryStatusInfo status);
+
+    [[nodiscard]] static std::vector<uint8_t> encode_status_request(
+        std::string_view subscriber_id = {}, uint8_t protocol_version = PROTOCOL_VERSION);
+    [[nodiscard]] static std::optional<std::string> decode_status_request(
+        std::span<const uint8_t> payload, std::string& error);
+
+    [[nodiscard]] static std::vector<uint8_t> encode_status_response(const RecoveryStatusInfo& status);
     [[nodiscard]] static std::optional<RecoveryStatusInfo> decode_status_response(
+        std::span<const uint8_t> payload, std::string& error);
+
+    [[nodiscard]] static std::vector<uint8_t> encode_bye(
+        std::string_view subscriber_id, uint8_t protocol_version = PROTOCOL_VERSION);
+    [[nodiscard]] static std::optional<std::string> decode_bye(
         std::span<const uint8_t> payload, std::string& error);
 };
 

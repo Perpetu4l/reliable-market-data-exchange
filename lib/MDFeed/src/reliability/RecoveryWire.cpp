@@ -55,7 +55,7 @@ std::optional<RecoveryWireFrame> RecoveryWireCodec::take_frame(std::vector<uint8
     if (stream.size() < 4 + size) return std::nullopt;
     const auto raw_type = stream[4];
     if (raw_type < static_cast<uint8_t>(RecoveryWireType::RECOVERY_REQUEST)
-        || raw_type > static_cast<uint8_t>(RecoveryWireType::RECOVERY_COMPLETE)) {
+        || raw_type > static_cast<uint8_t>(RecoveryWireType::BYE)) {
         error = "unknown recovery frame type"; stream.erase(stream.begin(), stream.begin() + 4 + size); return std::nullopt;
     }
     RecoveryWireFrame frame{static_cast<RecoveryWireType>(raw_type), {stream.begin() + 5, stream.begin() + 4 + size}};
@@ -237,12 +237,48 @@ std::optional<RecoveryResponse> RecoveryWireCodec::decode_snapshot_response(
     return result;
 }
 
-std::vector<uint8_t> RecoveryWireCodec::encode_status_response(const RecoveryStatusInfo status)
+std::vector<uint8_t> RecoveryWireCodec::encode_status_request(
+    const std::string_view subscriber_id, const uint8_t protocol_version)
 {
+    const auto id_size = std::min<size_t>(subscriber_id.size(), UINT16_MAX);
     std::vector<uint8_t> result;
-    result.reserve(16);
+    result.reserve(3 + id_size);
+    result.push_back(protocol_version);
+    put_u16(result, static_cast<uint16_t>(id_size));
+    result.insert(result.end(), subscriber_id.begin(), subscriber_id.begin() + id_size);
+    return result;
+}
+
+std::optional<std::string> RecoveryWireCodec::decode_status_request(
+    const std::span<const uint8_t> payload, std::string& error)
+{
+    error.clear();
+    if (payload.empty()) return std::string{};
+    size_t at = 0;
+    const uint8_t version = payload[at++];
+    if (version != PROTOCOL_VERSION) {
+        error = "unsupported recovery protocol version";
+        return std::nullopt;
+    }
+    uint16_t id_size = 0;
+    if (!read_u16(payload, at, id_size) || payload.size() - at != id_size) {
+        error = "malformed status request";
+        return std::nullopt;
+    }
+    return std::string(payload.begin() + at, payload.end());
+}
+
+std::vector<uint8_t> RecoveryWireCodec::encode_status_response(const RecoveryStatusInfo& status)
+{
+    const auto digest_size = std::min<size_t>(status.latest_book_digest.size(), UINT16_MAX);
+    std::vector<uint8_t> result;
+    result.reserve(19 + digest_size);
+    result.push_back(status.protocol_version);
     put_u64(result, status.latest_sequence);
     put_u64(result, status.history_minimum_sequence);
+    put_u16(result, static_cast<uint16_t>(digest_size));
+    result.insert(result.end(), status.latest_book_digest.begin(),
+        status.latest_book_digest.begin() + digest_size);
     return result;
 }
 
@@ -250,14 +286,61 @@ std::optional<RecoveryStatusInfo> RecoveryWireCodec::decode_status_response(
     const std::span<const uint8_t> payload, std::string& error)
 {
     error.clear();
-    size_t at = 0;
-    RecoveryStatusInfo result;
-    if (!read_u64(payload, at, result.latest_sequence)
-        || !read_u64(payload, at, result.history_minimum_sequence) || at != payload.size()) {
+    if (payload.empty()) {
         error = "invalid status response";
         return std::nullopt;
     }
+    size_t at = 0;
+    RecoveryStatusInfo result;
+    result.protocol_version = payload[at++];
+    if (result.protocol_version != PROTOCOL_VERSION) {
+        error = "unsupported recovery protocol version";
+        return std::nullopt;
+    }
+    uint16_t digest_size = 0;
+    if (!read_u64(payload, at, result.latest_sequence)
+        || !read_u64(payload, at, result.history_minimum_sequence)
+        || !read_u16(payload, at, digest_size)
+        || payload.size() - at != digest_size) {
+        error = "invalid status response";
+        return std::nullopt;
+    }
+    result.latest_book_digest.assign(payload.begin() + at, payload.end());
     return result;
+}
+
+std::vector<uint8_t> RecoveryWireCodec::encode_bye(
+    const std::string_view subscriber_id, const uint8_t protocol_version)
+{
+    const auto id_size = std::min<size_t>(subscriber_id.size(), UINT16_MAX);
+    std::vector<uint8_t> result;
+    result.reserve(3 + id_size);
+    result.push_back(protocol_version);
+    put_u16(result, static_cast<uint16_t>(id_size));
+    result.insert(result.end(), subscriber_id.begin(), subscriber_id.begin() + id_size);
+    return result;
+}
+
+std::optional<std::string> RecoveryWireCodec::decode_bye(
+    const std::span<const uint8_t> payload, std::string& error)
+{
+    error.clear();
+    if (payload.size() < 3) {
+        error = "malformed bye frame";
+        return std::nullopt;
+    }
+    size_t at = 0;
+    const uint8_t version = payload[at++];
+    if (version != PROTOCOL_VERSION) {
+        error = "unsupported recovery protocol version";
+        return std::nullopt;
+    }
+    uint16_t id_size = 0;
+    if (!read_u16(payload, at, id_size) || id_size == 0 || payload.size() - at != id_size) {
+        error = "malformed bye frame";
+        return std::nullopt;
+    }
+    return std::string(payload.begin() + at, payload.end());
 }
 
 } // namespace mdfeed::reliability
