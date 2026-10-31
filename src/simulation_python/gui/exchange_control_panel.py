@@ -320,6 +320,13 @@ class ExchangeControlPanel(QWidget):
             "QPushButton { background: #dc2626; color: white; font-weight: bold; padding: 6px 12px; border-radius: 5px; }"
         )
 
+        self.open_latest_dash_button = QPushButton("📊 Open Latest in 6-Graph Dashboard")
+        self.open_latest_dash_button.setMinimumHeight(36)
+        self.open_latest_dash_button.setStyleSheet(
+            "QPushButton { background: #0284c7; color: white; font-weight: bold; padding: 6px 12px; border-radius: 5px; }"
+        )
+        self.open_latest_dash_button.clicked.connect(self._open_latest_live_in_dashboard)
+
         self.start_server_button.clicked.connect(self._start_server)
         self.start_subscribers_button.clicked.connect(self._start_subscribers)
         self.stop_subscribers_button.clicked.connect(self.controller.stop_subscribers)
@@ -329,17 +336,22 @@ class ExchangeControlPanel(QWidget):
         btn_grid.addWidget(self.start_server_button, 0, 0)
         btn_grid.addWidget(self.start_subscribers_button, 0, 1)
         btn_grid.addWidget(self.start_workload_button, 0, 2)
-        btn_grid.addWidget(self.stop_subscribers_button, 1, 0, 1, 2)
-        btn_grid.addWidget(self.stop_button, 1, 2)
+        btn_grid.addWidget(self.stop_subscribers_button, 1, 0)
+        btn_grid.addWidget(self.stop_button, 1, 1)
+        btn_grid.addWidget(self.open_latest_dash_button, 1, 2)
         act_layout.addLayout(btn_grid)
 
         status_strip = QHBoxLayout()
         self.server_status = QLabel("Stopped")
-        self.server_status.setMinimumHeight(28)
-        self.server_status.setStyleSheet("font-weight: 700; color: #666; padding: 4px 8px;")
+        self.server_status.setMinimumHeight(30)
+        self.server_status.setStyleSheet(
+            "font-weight: 700; background: #334155; color: #f8fafc; padding: 4px 10px; border-radius: 5px;"
+        )
         self.exchange_live_stats_label = QLabel("latest_seq=0 | queue_depth=0 | subscribers=0")
-        self.exchange_live_stats_label.setMinimumHeight(28)
-        self.exchange_live_stats_label.setStyleSheet("font-weight: 600; color: #1e3a8a; padding: 4px 8px;")
+        self.exchange_live_stats_label.setMinimumHeight(30)
+        self.exchange_live_stats_label.setStyleSheet(
+            "font-weight: 600; background: #1e293b; color: #f8fafc; border: 1px solid #475569; padding: 4px 10px; border-radius: 5px;"
+        )
         status_strip.addWidget(QLabel("<b>Exchange:</b>"))
         status_strip.addWidget(self.server_status)
         status_strip.addWidget(self.exchange_live_stats_label, 1)
@@ -1025,6 +1037,15 @@ class ExchangeControlPanel(QWidget):
         target = str(selected[0].data(Qt.ItemDataRole.UserRole))
         self.open_in_dashboard_requested.emit(target)
 
+    def _open_latest_live_in_dashboard(self) -> None:
+        if self.controller.current_run_dir and self.controller.current_run_dir.is_dir():
+            self.open_in_dashboard_requested.emit(str(self.controller.current_run_dir))
+            return
+        self._refresh_saved_results()
+        if self.saved_results.count() > 0:
+            target = str(self.saved_results.item(0).data(Qt.ItemDataRole.UserRole))
+            self.open_in_dashboard_requested.emit(target)
+
     def _start_server(self) -> None:
         self.seq_history.clear()
         self.md_sent_history.clear()
@@ -1244,8 +1265,14 @@ class ExchangeControlPanel(QWidget):
 
     def _set_server_status(self, status: str) -> None:
         self.server_status.setText(status)
-        colour = {"Ready": "#197b30", "Starting": "#9a6700", "Stopped": "#666"}.get(status, "#b42318")
-        self.server_status.setStyleSheet(f"font-weight: 700; color: {colour}; padding: 4px 8px;")
+        bg, fg = {
+            "Ready": ("#16a34a", "#ffffff"),
+            "Starting": ("#d97706", "#ffffff"),
+            "Stopped": ("#334155", "#f8fafc"),
+        }.get(status, ("#dc2626", "#ffffff"))
+        self.server_status.setStyleSheet(
+            f"font-weight: 700; background: {bg}; color: {fg}; padding: 4px 10px; border-radius: 5px;"
+        )
 
     def _show_result(self, result: dict) -> None:
         cid = int(result.get("client_id", 1))

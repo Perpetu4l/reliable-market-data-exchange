@@ -90,14 +90,17 @@ class ReliabilityDashboard(QTabWidget):
         self.summary.setWordWrap(True)
         self.summary.setMinimumHeight(46)
         self.summary.setStyleSheet(
-            "padding: 10px 14px; background: #f8fafc; border: 2px solid #64748b; "
+            "padding: 10px 14px; background: #f8fafc; color: #0f172a; border: 2px solid #64748b; "
             "border-radius: 6px; font-weight: 700; font-size: 13px;"
         )
 
         self.provenance_banner = QLabel("Provenance: preset sweep CSVs pre-loaded from results/")
         self.provenance_banner.setWordWrap(True)
         self.provenance_banner.setMinimumHeight(34)
-        self.provenance_banner.setStyleSheet("color: #334155; font-size: 12px; font-weight: 600; padding: 4px 8px;")
+        self.provenance_banner.setStyleSheet(
+            "background: #1e293b; color: #f8fafc; border: 1px solid #475569; "
+            "border-radius: 5px; font-size: 12px; font-weight: 600; padding: 5px 10px;"
+        )
 
         self.last_loaded_csv_path: Path | None = None
 
@@ -344,11 +347,16 @@ class ReliabilityDashboard(QTabWidget):
                 chart.addItem(pg.BarGraphItem(x=[pos], height=[val], width=0.58, brush=pg.mkBrush(c)))
         else:
             chart.addItem(pg.BarGraphItem(x=positions, height=values, width=0.58, brush=pg.mkBrush(colour)))
+        for pos, val in zip(positions, values):
+            val_txt = f"{int(val):,}" if abs(val - round(val)) < 1e-4 else f"{val:.2f}"
+            lbl_item = pg.TextItem(val_txt, color=(30, 41, 59), anchor=(0.5, 1.0))
+            lbl_item.setPos(pos, val)
+            chart.addItem(lbl_item)
         axis = chart.getAxis("bottom")
         axis.setTicks([list(zip(positions, labels))])
         maximum = max(values, default=0.0)
         chart.setXRange(-0.6, len(values) - 0.4, padding=0.05)
-        chart.setYRange(0, max(1.0, maximum * 1.2), padding=0)
+        chart.setYRange(0, max(1.0, maximum * 1.26), padding=0)
 
     def _browse_and_load(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -397,6 +405,11 @@ class ReliabilityDashboard(QTabWidget):
             "delay_per_req_us": self.fairness.delay_per_req_us.value(),
             "delay_per_event_us": self.fairness.delay_per_event_us.value(),
             "tamper_mode": self.integrity.tamper_mode.currentText(),
+            "dup_rate": self.experiment.dup_rate.value(),
+            "reorder_rate": self.experiment.reorder_rate.value(),
+            "delay_ms": self.experiment.delay_ms.value(),
+            "recovery_concurrency": self.experiment.recovery_concurrency.value(),
+            "no_recovery": self.experiment.no_recovery_checkbox.isChecked(),
         })
 
     def _start_preset(self) -> None:
@@ -527,8 +540,8 @@ class ReliabilityDashboard(QTabWidget):
         )
 
         self.summary.setStyleSheet(
-            "padding: 8px 12px; background: #f0fdf4; border: 2px solid #16a34a; "
-            "color: #15803d; font-weight: 700; border-radius: 5px;"
+            "padding: 10px 14px; background: #f0fdf4; border: 2px solid #16a34a; "
+            "color: #15803d; font-weight: 700; border-radius: 6px;"
         )
         self.summary.setText(
             f"IN-PROCESS BASELINE COMPLETED ({result.get('mode')}): {int(sent)} events delivered, "
@@ -585,8 +598,8 @@ class ReliabilityDashboard(QTabWidget):
 
         if not records:
             self.summary.setStyleSheet(
-                "padding: 8px 12px; background: #fef2f2; border: 2px solid #b42318; "
-                "color: #b42318; font-weight: 700; border-radius: 5px;"
+                "padding: 10px 14px; background: #fef2f2; border: 2px solid #b42318; "
+                "color: #b42318; font-weight: 700; border-radius: 6px;"
             )
             self.summary.setText(f"Live run failed before subscriber completion: {result.get('error', 'unknown error')}")
             self.setCurrentIndex(0)
@@ -851,8 +864,8 @@ class ReliabilityDashboard(QTabWidget):
         expected_fail = bool(result.get("expected_failure_observed"))
         if all_completed:
             self.summary.setStyleSheet(
-                "padding: 8px 12px; background: #f0fdf4; border: 2px solid #197b30; "
-                "color: #197b30; font-weight: 700; border-radius: 5px;"
+                "padding: 10px 14px; background: #f0fdf4; border: 2px solid #197b30; "
+                "color: #197b30; font-weight: 700; border-radius: 6px;"
             )
             self.summary.setText(
                 f"LIVE RUN PASSED: {len(records)} subscriber(s), L={r0.get('events_expected','0')} events accounted for, "
@@ -860,8 +873,8 @@ class ReliabilityDashboard(QTabWidget):
             )
         elif expected_fail:
             self.summary.setStyleSheet(
-                "padding: 8px 12px; background: #fef2f2; border: 2px solid #b42318; "
-                "color: #b42318; font-weight: 700; border-radius: 5px;"
+                "padding: 10px 14px; background: #fef2f2; border: 2px solid #b42318; "
+                "color: #b42318; font-weight: 700; border-radius: 6px;"
             )
             self.summary.setText(
                 f"EXPECTED FAILURE OBSERVED (negative control / tamper): run_status={r0.get('run_status')}, "
@@ -869,8 +882,8 @@ class ReliabilityDashboard(QTabWidget):
             )
         else:
             self.summary.setStyleSheet(
-                "padding: 8px 12px; background: #fef2f2; border: 2px solid #b42318; "
-                "color: #b42318; font-weight: 700; border-radius: 5px;"
+                "padding: 10px 14px; background: #fef2f2; border: 2px solid #b42318; "
+                "color: #b42318; font-weight: 700; border-radius: 6px;"
             )
             self.summary.setText(
                 f"LIVE RUN FAILED INTEGRITY: run_status={r0.get('run_status')}, reason={r0.get('reason')}, "
@@ -883,14 +896,14 @@ class ReliabilityDashboard(QTabWidget):
         presets = result.get("presets", [])
         if ok:
             self.summary.setStyleSheet(
-                "padding: 8px 12px; background: #f0fdf4; border: 2px solid #197b30; "
-                "color: #197b30; font-weight: 700; border-radius: 5px;"
+                "padding: 10px 14px; background: #f0fdf4; border: 2px solid #197b30; "
+                "color: #197b30; font-weight: 700; border-radius: 6px;"
             )
             self.summary.setText(f"Preset sweep completed ({len(presets)} preset(s)). Rendering all 6 aggregated charts from CSV...")
         else:
             self.summary.setStyleSheet(
-                "padding: 8px 12px; background: #fef2f2; border: 2px solid #b42318; "
-                "color: #b42318; font-weight: 700; border-radius: 5px;"
+                "padding: 10px 14px; background: #fef2f2; border: 2px solid #b42318; "
+                "color: #b42318; font-weight: 700; border-radius: 6px;"
             )
             self.summary.setText("Preset sweep reported one or more failed runs. Inspect red states and logs below.")
         self.load_aggregate_csvs()
@@ -1055,8 +1068,8 @@ class ReliabilityDashboard(QTabWidget):
 
         if loaded_any and not preserve_empty_summary:
             self.summary.setStyleSheet(
-                "padding: 8px 12px; background: #eff6ff; border: 2px solid #2563eb; "
-                "color: #1e40af; font-weight: 700; border-radius: 5px;"
+                "padding: 10px 14px; background: #eff6ff; border: 2px solid #2563eb; "
+                "color: #1e40af; font-weight: 700; border-radius: 6px;"
             )
             self.summary.setText(
                 f"Loaded aggregated preset sweep CSVs from {res_dir.name}/ across all 6 visual charts."

@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 
 class ExperimentPanel(QGroupBox):
     def __init__(self, parent=None):
-        super().__init__("Experiment Parameters & One-Click Actions", parent)
+        super().__init__("Experiment Parameters, Impairments & One-Click Actions", parent)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(16, 16, 16, 14)
         outer.setSpacing(12)
@@ -91,6 +91,38 @@ class ExperimentPanel(QGroupBox):
         self.live_subscribers.setMinimumHeight(34)
         self.live_subscribers.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
+        # Receive-side impairment & concurrency controls (Phase R2 / R6)
+        self.dup_rate = QDoubleSpinBox()
+        self.dup_rate.setRange(0.0, 1.0)
+        self.dup_rate.setDecimals(2)
+        self.dup_rate.setSingleStep(0.05)
+        self.dup_rate.setValue(0.0)
+        self.dup_rate.setMinimumHeight(34)
+        self.dup_rate.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+
+        self.reorder_rate = QDoubleSpinBox()
+        self.reorder_rate.setRange(0.0, 1.0)
+        self.reorder_rate.setDecimals(2)
+        self.reorder_rate.setSingleStep(0.05)
+        self.reorder_rate.setValue(0.0)
+        self.reorder_rate.setMinimumHeight(34)
+        self.reorder_rate.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+
+        self.delay_ms = QSpinBox()
+        self.delay_ms.setRange(0, 5000)
+        self.delay_ms.setValue(0)
+        self.delay_ms.setSuffix(" ms")
+        self.delay_ms.setMinimumHeight(34)
+        self.delay_ms.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+
+        self.recovery_concurrency = QSpinBox()
+        self.recovery_concurrency.setRange(1, 16)
+        self.recovery_concurrency.setValue(1)
+        self.recovery_concurrency.setMinimumHeight(34)
+        self.recovery_concurrency.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+
+        self.no_recovery_checkbox = QCheckBox("Negative Control (--no-recovery)")
+
         # Row 0: Mode, Feed Mode, Loss Rate
         grid.addWidget(QLabel("<b>Execution:</b>"), 0, 0)
         grid.addWidget(self.execution_mode, 0, 1)
@@ -114,6 +146,19 @@ class ExperimentPanel(QGroupBox):
         grid.addWidget(self.events, 2, 3)
         grid.addWidget(QLabel("<b>Interface IPv4:</b>"), 2, 4)
         grid.addWidget(self.lan_interface, 2, 5)
+
+        # Row 3: Dup Rate, Reorder Rate, Hold-Back Delay / Concurrency
+        grid.addWidget(QLabel("<b>Dup Rate (--dup):</b>"), 3, 0)
+        grid.addWidget(self.dup_rate, 3, 1)
+        grid.addWidget(QLabel("<b>Reorder (--reorder):</b>"), 3, 2)
+        grid.addWidget(self.reorder_rate, 3, 3)
+        delay_conc_row = QHBoxLayout()
+        delay_conc_row.setSpacing(8)
+        delay_conc_row.addWidget(self.delay_ms, 1)
+        delay_conc_row.addWidget(QLabel("<b>Conc(K):</b>"))
+        delay_conc_row.addWidget(self.recovery_concurrency, 1)
+        grid.addWidget(QLabel("<b>Delay / Conc:</b>"), 3, 4)
+        grid.addLayout(delay_conc_row, 3, 5)
 
         outer.addLayout(grid)
 
@@ -190,6 +235,7 @@ class ExperimentPanel(QGroupBox):
         status_row.addWidget(QLabel("<b>Progress:</b>"))
         status_row.addWidget(self.progress)
         status_row.addWidget(self.status, 1)
+        status_row.addWidget(self.no_recovery_checkbox)
         status_row.addWidget(self.show_theory_checkbox)
         status_row.addWidget(self.log_y_checkbox)
         outer.addLayout(status_row)

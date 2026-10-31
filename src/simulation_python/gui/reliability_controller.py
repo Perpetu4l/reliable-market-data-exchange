@@ -131,6 +131,13 @@ class ReliabilityExperimentController(QObject):
         interval = int(config["snapshot_interval"]) if config["snapshots_enabled"] else 0
         mode = str(config["mode"])
         interface = str(config.get("interface", "127.0.0.1"))
+        dup_rate = float(config.get("dup_rate", 0.0))
+        reorder_rate = float(config.get("reorder_rate", 0.0))
+        delay_ms = int(config.get("delay_ms", 0))
+        concurrency = int(config.get("recovery_concurrency", 1))
+        no_recovery = bool(config.get("no_recovery", False))
+        tamper_mode = str(config.get("tamper_mode", "none"))
+
         arguments = [
             str(runner),
             "--build-dir", str(build_dir),
@@ -145,11 +152,17 @@ class ReliabilityExperimentController(QObject):
             "--recovery-workers", str(config.get("workers", 1)),
             "--service-delay-us-per-request", str(config.get("delay_per_req_us", 0)),
             "--service-delay-us-per-event", str(config.get("delay_per_event_us", 0)),
-            "--tamper-snapshot", str(config.get("tamper_mode", "none")),
+            "--tamper-snapshot", tamper_mode,
+            "--dup", str(dup_rate),
+            "--reorder", str(reorder_rate),
+            "--delay-ms", str(delay_ms),
+            "--recovery-concurrency", str(concurrency),
         ]
         if not config.get("snapshot_on_demand", True):
             arguments.append("--no-snapshot-on-demand")
-        if str(config.get("tamper_mode", "none")) != "none":
+        if no_recovery:
+            arguments.append("--no-recovery")
+        if tamper_mode != "none" or (no_recovery and float(config["loss_rate"]) > 0.0):
             arguments.append("--expect-failure")
         loss = str(config["loss_rate"])
         if mode == "independent":
@@ -173,7 +186,7 @@ class ReliabilityExperimentController(QObject):
             self.log_line.emit(process.errorString())
             return False
         self.process = process
-        self.progress_changed.emit(20)
+        self.progress_changed.emit(25)
         self.status_changed.emit(f"Running live experiment ({config['subscribers']} subscriber(s))...")
         return True
 
@@ -207,7 +220,7 @@ class ReliabilityExperimentController(QObject):
             self.status_changed.emit(f"Failed to start preset: {process.errorString()}")
             return False
         self.process = process
-        self.progress_changed.emit(15)
+        self.progress_changed.emit(20)
         self.status_changed.emit(f"Running preset '{preset}' ({size})...")
         return True
 
