@@ -115,12 +115,6 @@ unzip reliable-market-data-exchange.zip
 cd reliable-market-data-exchange
 ```
 
-### Step 3: Verify Documentation References
-
-- **[`docs/RECOVERY_PROTOCOL.md`](docs/RECOVERY_PROTOCOL.md)** — Framed TCP Recovery Protocol v2 wire specification
-- **[`docs/METRICS.md`](docs/METRICS.md)** — Sequence-accounting invariants, repair latency classes, and fairness formulas
-- **[`docs/LIVE_TESTING.md`](docs/LIVE_TESTING.md)** — Single-host loopback, two-laptop LAN (`udp_lan`), and `tc netem` / `pfctl` setup
-
 ---
 
 ## Build Instructions
@@ -744,7 +738,10 @@ reliable-market-data-exchange/
 │   └── plot_results.py              # Generates 6 publication PNG charts from preset CSVs
 │
 └── docs/
-    
+    ├── presentation_with_voiceover_group_11.pptx
+    ├── report_group_11.docx
+    └── report_group_11.pdf
+        
 ```
 
 ### File Responsibilities
