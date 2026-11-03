@@ -12,22 +12,22 @@ This guide explains how to run the live UDP multicast + TCP recovery pipeline:
 
 ```sh
 # Fast baseline suite (< 20 s): deterministic seed check, 0% loss, 8-subscriber lossy run, negative control, snapshot tamper
-/Library/Frameworks/Python.framework/Versions/3.14/bin/python3 tests/live_reliability_e2e.py --build-dir build-local
+python3 tests/live_reliability_e2e.py --build-dir build-local
 
 # Slow scheduler contention suite (~15 s): proves RR quiet p99 < FCFS quiet p99 by >= 2x
-/Library/Frameworks/Python.framework/Versions/3.14/bin/python3 tests/live_reliability_e2e.py --build-dir build-local --slow
+python3 tests/live_reliability_e2e.py --build-dir build-local --slow
 
 # 30-run consecutive lossy flake gate
-/Library/Frameworks/Python.framework/Versions/3.14/bin/python3 tests/live_reliability_e2e.py --build-dir build-local --repeat 30
+python3 tests/live_reliability_e2e.py --build-dir build-local --repeat 30
 ```
 
 ### Running All Five Experiment Presets & Generating Plots
 
 ```sh
-/Library/Frameworks/Python.framework/Versions/3.14/bin/python3 src/reliability_runner/experiments.py \
+python3 src/reliability_runner/experiments.py \
   --preset all --size quick --build-dir build-local --results-dir results/live
 
-/Library/Frameworks/Python.framework/Versions/3.14/bin/python3 tools/plot_results.py \
+python3 tools/plot_results.py \
   --results-dir results/live --out-dir results/plots
 ```
 
@@ -37,7 +37,7 @@ This produces:
 - `results/live/history_snapshot_sweep/aggregate-history_snapshot_sweep.csv`
 - `results/live/snapshot_tamper/aggregate-snapshot_tamper.csv`
 - `results/live/scalability/aggregate-scalability.csv`
-- `results/plots/chart1_redundancy_gap_rate.png` .. `chart6_latency_cdf.png`
+- `results/plots/chart1_recovery_gap_rate.png` .. `chart6_latency_cdf.png`
 
 ---
 
@@ -116,7 +116,7 @@ Wait for `SUBSCRIBER_READY id=lan-sub-1 feeds=ab`. Notice on Laptop A that the e
 wait
 ```
 
-500 ms after the workload clients finish, `lan-sub-1` automatically detects quiescence (`--stop-when-idle-ms 500`), reconciles `STATUS` with Laptop A, verifies its SHA-256 order book digest (`book_matches_exchange=1`), sends `BYE`, and writes `results/lan-sub-1.csv`.
+500 ms after the workload clients finish, `lan-sub-1` automatically detects quiescence (`--stop-when-idle-ms 500`), reconciles `STATUS` with Laptop A, verifies its order book digest (`book_matches_exchange=1`), sends `BYE`, and writes `results/lan-sub-1.csv`.
 
 ---
 

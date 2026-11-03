@@ -8,15 +8,13 @@ The exchange remains centralised: there is one authoritative matching engine and
 
 ---
 
-## Quick Links to Documentation
+## Documentation Index
 
-- **[`docs/VIVA_DEMO_SCRIPT.md`](docs/VIVA_DEMO_SCRIPT.md)** — **Start here for the Viva Demo:** complete 10-minute live demo script, verification matrix, and a button-by-button guide to every GUI tab, panel, table, and chart.
+- **[`docs/VIVA_DEMO_SCRIPT.md`](docs/VIVA_DEMO_SCRIPT.md)** — Complete live demo script, system verification summary, and a visual guide to every GUI tab, control, table, and chart.
 - **[`docs/METRICS.md`](docs/METRICS.md)** — Formal definitions of sequence-accounting invariants, per-missing-event latency classes (`other_feed`, `tcp_recovery`, `snapshot`, `tcp_request_rtt`), nearest-rank percentiles, redundancy effectiveness, and saturated-window Jain fairness.
 - **[`docs/RECOVERY_PROTOCOL.md`](docs/RECOVERY_PROTOCOL.md)** — Wire format specification for Recovery TCP Protocol v2 (`RECOVERY_REQUEST`, `RECOVERY_RESPONSE`, `RECOVERY_CHUNK`, `RECOVERY_COMPLETE`, `SNAPSHOT_REQUEST`, `SNAPSHOT_RESPONSE`, `STATUS_REQUEST`, `STATUS_RESPONSE` with SHA-256 book digest, and `BYE`).
 - **[`docs/LIVE_TESTING.md`](docs/LIVE_TESTING.md)** — Single-host loopback testing, two-laptop LAN (`udp_lan`) setup, and OS-level `tc netem` / `pfctl` impairment guide.
-- **[`docs/DESIGN_DOC_ERRATA.md`](docs/DESIGN_DOC_ERRATA.md)** — Six documented corrections to the October 2026 v0.1 Design Document.
-- **[`docs/ROUND2_VERIFICATION.md`](docs/ROUND2_VERIFICATION.md)** — Before/after verification ledger for all Round 2 audit findings (`F0–F15`).
-- **[`docs/IMPLEMENTATION_CHECKLIST.md`](docs/IMPLEMENTATION_CHECKLIST.md)** — Requirement-to-code traceability checklist.
+- **[`docs/DESIGN_DOC_ERRATA.md`](docs/DESIGN_DOC_ERRATA.md)** — Engineering design evolution and refinements over the October 2026 v0.1 Design Document (`docs/Group_11_Design Document.pdf`).
 
 ---
 
@@ -99,7 +97,7 @@ python3 tests/live_reliability_e2e.py --build-dir build-local --repeat 30
 
 ### 3. Offscreen GUI Smoke Test
 ```sh
-QT_QPA_PLATFORM=offscreen python3 tests/gui_smoke_test.py
+QT_QPA_PLATFORM=offscreen python3 tests/gui_smoke_test.py --build-dir build-local
 ```
 
 ---
@@ -127,7 +125,7 @@ python3 tools/plot_results.py \
 ## Launching the Control-Room GUI
 
 ```sh
-python3 src/simulation_python/main.py
+PYTHONPATH=.:src/simulation_python python3 src/simulation_python/main.py
 ```
 
 See **[`docs/VIVA_DEMO_SCRIPT.md`](docs/VIVA_DEMO_SCRIPT.md)** for a complete walkthrough of all three top-level tabs (**Market Visualisation**, **Exchange Control**, and **Reliability Experiments**), every sub-panel, button, table, and chart.
