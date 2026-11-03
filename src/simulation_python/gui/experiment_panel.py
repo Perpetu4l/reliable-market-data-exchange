@@ -1,4 +1,4 @@
-"""Spacious, full-width visual control panel for reliability experiments and preset sweeps."""
+"""Grouped configuration and execution panel for Reliability Experiments."""
 
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -14,228 +14,214 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QSpinBox,
     QVBoxLayout,
+    QWidget,
 )
 
+from .theme import COLOR_BLUE, COLOR_GREEN, COLOR_PURPLE, COLOR_RED, button_style
 
-class ExperimentPanel(QGroupBox):
+
+class ExperimentPanel(QWidget):
+    """Organises Transport/Network, Packet Impairment, Subscriber Configuration, and Execution Controls."""
+
     def __init__(self, parent=None):
-        super().__init__("Experiment Parameters, Impairments & One-Click Actions", parent)
+        super().__init__(parent)
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(16, 16, 16, 14)
-        outer.setSpacing(12)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(8)
 
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(16)
-        grid.setVerticalSpacing(10)
-        grid.setColumnStretch(1, 1)
-        grid.setColumnStretch(3, 1)
-        grid.setColumnStretch(5, 1)
+        # Top row of 3 distinct configuration group boxes (Section 8.1)
+        groups_row = QHBoxLayout()
+        groups_row.setSpacing(10)
+
+        # 1. Transport & Network Group
+        net_group = QGroupBox("1. Transport && Network")
+        net_grid = QGridLayout(net_group)
+        net_grid.setContentsMargins(10, 14, 10, 10)
+        net_grid.setHorizontalSpacing(10)
+        net_grid.setVerticalSpacing(6)
+        net_grid.setColumnStretch(1, 1)
 
         self.execution_mode = QComboBox()
         self.execution_mode.addItem("In-process simulation (fast baseline)", "inprocess")
         self.execution_mode.addItem("Live UDP/TCP loopback", "udp_loopback")
         self.execution_mode.addItem("Live UDP/TCP LAN", "udp_lan")
         self.execution_mode.setCurrentIndex(1)
-        self.execution_mode.setMinimumHeight(34)
         self.execution_mode.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-
-        self.lan_interface = QLineEdit("127.0.0.1")
-        self.lan_interface.setMinimumHeight(34)
-        self.lan_interface.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self.lan_interface.setToolTip("Local IPv4 interface for UDP multicast (127.0.0.1 for loopback)")
 
         self.mode = QComboBox()
         self.mode.addItem("Single feed (A)", "single")
         self.mode.addItem("Dual feed — independent loss (A+B)", "independent")
         self.mode.addItem("Dual feed — correlated loss (A+B)", "correlated")
         self.mode.setCurrentIndex(1)
-        self.mode.setMinimumHeight(34)
         self.mode.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
-        self.events = QSpinBox()
-        self.events.setRange(1, 1_000_000)
-        self.events.setValue(500)
-        self.events.setMinimumHeight(34)
-        self.events.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.lan_interface = QLineEdit("127.0.0.1")
+        self.lan_interface.setToolTip("Local IPv4 interface for UDP multicast (127.0.0.1 for loopback)")
+
+        net_grid.addWidget(QLabel("<b>Execution Mode:</b>"), 0, 0)
+        net_grid.addWidget(self.execution_mode, 0, 1)
+        net_grid.addWidget(QLabel("<b>Feed Mode:</b>"), 1, 0)
+        net_grid.addWidget(self.mode, 1, 1)
+        net_grid.addWidget(QLabel("<b>Interface IPv4:</b>"), 2, 0)
+        net_grid.addWidget(self.lan_interface, 2, 1)
+
+        # 2. Packet Impairment Group
+        imp_group = QGroupBox("2. Packet Impairment && Fault Seed")
+        imp_grid = QGridLayout(imp_group)
+        imp_grid.setContentsMargins(10, 14, 10, 10)
+        imp_grid.setHorizontalSpacing(10)
+        imp_grid.setVerticalSpacing(6)
+        imp_grid.setColumnStretch(1, 1)
+        imp_grid.setColumnStretch(3, 1)
 
         self.loss_rate = QDoubleSpinBox()
         self.loss_rate.setRange(0.0, 1.0)
         self.loss_rate.setDecimals(3)
         self.loss_rate.setSingleStep(0.02)
         self.loss_rate.setValue(0.10)
-        self.loss_rate.setMinimumHeight(34)
-        self.loss_rate.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
-        self.seed = QSpinBox()
-        self.seed.setRange(0, 2_147_483_647)
-        self.seed.setValue(42)
-        self.seed.setMinimumHeight(34)
-        self.seed.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-
-        self.history = QSpinBox()
-        self.history.setRange(0, 1_000_000)
-        self.history.setValue(65536)
-        self.history.setMinimumHeight(34)
-        self.history.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-
-        self.live_duration = QSpinBox()
-        self.live_duration.setRange(1, 3_600)
-        self.live_duration.setValue(3)
-        self.live_duration.setSuffix(" s")
-        self.live_duration.setMinimumHeight(34)
-        self.live_duration.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-
-        self.live_subscribers = QSpinBox()
-        self.live_subscribers.setRange(1, 32)
-        self.live_subscribers.setValue(2)
-        self.live_subscribers.setMinimumHeight(34)
-        self.live_subscribers.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-
-        # Receive-side impairment & concurrency controls (Phase R2 / R6)
         self.dup_rate = QDoubleSpinBox()
         self.dup_rate.setRange(0.0, 1.0)
         self.dup_rate.setDecimals(2)
         self.dup_rate.setSingleStep(0.05)
         self.dup_rate.setValue(0.0)
-        self.dup_rate.setMinimumHeight(34)
-        self.dup_rate.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         self.reorder_rate = QDoubleSpinBox()
         self.reorder_rate.setRange(0.0, 1.0)
         self.reorder_rate.setDecimals(2)
         self.reorder_rate.setSingleStep(0.05)
         self.reorder_rate.setValue(0.0)
-        self.reorder_rate.setMinimumHeight(34)
-        self.reorder_rate.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         self.delay_ms = QSpinBox()
         self.delay_ms.setRange(0, 5000)
         self.delay_ms.setValue(0)
         self.delay_ms.setSuffix(" ms")
-        self.delay_ms.setMinimumHeight(34)
-        self.delay_ms.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+
+        self.seed = QSpinBox()
+        self.seed.setRange(0, 2_147_483_647)
+        self.seed.setValue(42)
+
+        self.no_recovery_checkbox = QCheckBox("Negative Control (--no-recovery)")
+
+        imp_grid.addWidget(QLabel("<b>Loss Rate:</b>"), 0, 0)
+        imp_grid.addWidget(self.loss_rate, 0, 1)
+        imp_grid.addWidget(QLabel("<b>Dup Rate:</b>"), 0, 2)
+        imp_grid.addWidget(self.dup_rate, 0, 3)
+        imp_grid.addWidget(QLabel("<b>Reorder Rate:</b>"), 1, 0)
+        imp_grid.addWidget(self.reorder_rate, 1, 1)
+        imp_grid.addWidget(QLabel("<b>Hold Delay:</b>"), 1, 2)
+        imp_grid.addWidget(self.delay_ms, 1, 3)
+        imp_grid.addWidget(QLabel("<b>Fault Seed:</b>"), 2, 0)
+        imp_grid.addWidget(self.seed, 2, 1)
+        imp_grid.addWidget(self.no_recovery_checkbox, 2, 2, 1, 2)
+
+        # 3. Subscriber & History Configuration Group
+        sub_group = QGroupBox("3. Subscribers, Workload && History")
+        sub_grid = QGridLayout(sub_group)
+        sub_grid.setContentsMargins(10, 14, 10, 10)
+        sub_grid.setHorizontalSpacing(10)
+        sub_grid.setVerticalSpacing(6)
+        sub_grid.setColumnStretch(1, 1)
+        sub_grid.setColumnStretch(3, 1)
+
+        self.live_subscribers = QSpinBox()
+        self.live_subscribers.setRange(1, 32)
+        self.live_subscribers.setValue(2)
+
+        self.live_duration = QSpinBox()
+        self.live_duration.setRange(1, 3_600)
+        self.live_duration.setValue(3)
+        self.live_duration.setSuffix(" s")
 
         self.recovery_concurrency = QSpinBox()
         self.recovery_concurrency.setRange(1, 16)
         self.recovery_concurrency.setValue(1)
-        self.recovery_concurrency.setMinimumHeight(34)
-        self.recovery_concurrency.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
-        self.no_recovery_checkbox = QCheckBox("Negative Control (--no-recovery)")
+        self.history = QSpinBox()
+        self.history.setRange(0, 1_000_000)
+        self.history.setValue(65536)
 
-        # Row 0: Mode, Feed Mode, Loss Rate
-        grid.addWidget(QLabel("<b>Execution:</b>"), 0, 0)
-        grid.addWidget(self.execution_mode, 0, 1)
-        grid.addWidget(QLabel("<b>Feed Mode:</b>"), 0, 2)
-        grid.addWidget(self.mode, 0, 3)
-        grid.addWidget(QLabel("<b>Drop / Loss Rate:</b>"), 0, 4)
-        grid.addWidget(self.loss_rate, 0, 5)
+        self.events = QSpinBox()
+        self.events.setRange(1, 1_000_000)
+        self.events.setValue(500)
 
-        # Row 1: Subscribers, Duration, History
-        grid.addWidget(QLabel("<b>Subscribers (1–32):</b>"), 1, 0)
-        grid.addWidget(self.live_subscribers, 1, 1)
-        grid.addWidget(QLabel("<b>Live Duration:</b>"), 1, 2)
-        grid.addWidget(self.live_duration, 1, 3)
-        grid.addWidget(QLabel("<b>History Window:</b>"), 1, 4)
-        grid.addWidget(self.history, 1, 5)
+        sub_grid.addWidget(QLabel("<b>Subscribers:</b>"), 0, 0)
+        sub_grid.addWidget(self.live_subscribers, 0, 1)
+        sub_grid.addWidget(QLabel("<b>Duration:</b>"), 0, 2)
+        sub_grid.addWidget(self.live_duration, 0, 3)
+        sub_grid.addWidget(QLabel("<b>Concurrency (K):</b>"), 1, 0)
+        sub_grid.addWidget(self.recovery_concurrency, 1, 1)
+        sub_grid.addWidget(QLabel("<b>History Cap:</b>"), 1, 2)
+        sub_grid.addWidget(self.history, 1, 3)
+        sub_grid.addWidget(QLabel("<b>In-Proc Events:</b>"), 2, 0)
+        sub_grid.addWidget(self.events, 2, 1, 1, 3)
 
-        # Row 2: Seed, In-Process Events, Interface IP
-        grid.addWidget(QLabel("<b>Fault Seed:</b>"), 2, 0)
-        grid.addWidget(self.seed, 2, 1)
-        grid.addWidget(QLabel("<b>In-Process Events:</b>"), 2, 2)
-        grid.addWidget(self.events, 2, 3)
-        grid.addWidget(QLabel("<b>Interface IPv4:</b>"), 2, 4)
-        grid.addWidget(self.lan_interface, 2, 5)
+        groups_row.addWidget(net_group, 3)
+        groups_row.addWidget(imp_group, 4)
+        groups_row.addWidget(sub_group, 4)
+        outer.addLayout(groups_row)
 
-        # Row 3: Dup Rate, Reorder Rate, Hold-Back Delay / Concurrency
-        grid.addWidget(QLabel("<b>Dup Rate (--dup):</b>"), 3, 0)
-        grid.addWidget(self.dup_rate, 3, 1)
-        grid.addWidget(QLabel("<b>Reorder (--reorder):</b>"), 3, 2)
-        grid.addWidget(self.reorder_rate, 3, 3)
-        delay_conc_row = QHBoxLayout()
-        delay_conc_row.setSpacing(8)
-        delay_conc_row.addWidget(self.delay_ms, 1)
-        delay_conc_row.addWidget(QLabel("<b>Conc(K):</b>"))
-        delay_conc_row.addWidget(self.recovery_concurrency, 1)
-        grid.addWidget(QLabel("<b>Delay / Conc:</b>"), 3, 4)
-        grid.addLayout(delay_conc_row, 3, 5)
+        # Execution & Preset Sweep Control Bar (Section 8.2)
+        exec_box = QGroupBox("Experiment Execution && Preset Sweeps")
+        exec_layout = QHBoxLayout(exec_box)
+        exec_layout.setContentsMargins(10, 12, 10, 8)
+        exec_layout.setSpacing(10)
 
-        outer.addLayout(grid)
+        self.live_start_button = QPushButton("▶ Run Experiment (Live UDP/TCP)")
+        self.live_start_button.setMinimumHeight(36)
+        self.live_start_button.setStyleSheet(button_style("#059669", "#047857"))
 
-        # Preset & Options Row
+        self.start_button = QPushButton("⚡ Run In-Process Baseline")
+        self.start_button.setMinimumHeight(36)
+        self.start_button.setStyleSheet(button_style("#2563eb", "#1d4ed8"))
+
         self.preset_combo = QComboBox()
         self.preset_combo.addItem("Redundancy Sweep (Loss x Feed Mode)", "redundancy_sweep")
         self.preset_combo.addItem("Scheduler Contention (FCFS vs Round-Robin)", "scheduler_contention")
         self.preset_combo.addItem("History & Snapshot Fallback Sweep", "history_snapshot_sweep")
         self.preset_combo.addItem("Snapshot Tamper Verification", "snapshot_tamper")
         self.preset_combo.addItem("Scalability Sweep (N=1..16 Subscribers)", "scalability")
-        self.preset_combo.setMinimumHeight(38)
+        self.preset_combo.setMinimumHeight(34)
 
         self.preset_size = QComboBox()
         self.preset_size.addItem("Quick", "quick")
         self.preset_size.addItem("Full", "full")
-        self.preset_size.setMinimumHeight(38)
-
-        self.show_theory_checkbox = QCheckBox("Show theory curves (p, p²)")
-        self.show_theory_checkbox.setChecked(True)
-        self.log_y_checkbox = QCheckBox("Log-Y scale on Chart 1")
-
-        # Main Action Buttons Row
-        self.live_start_button = QPushButton("▶ Run Live Experiment (Updates All 6 Graphs)")
-        self.live_start_button.setMinimumHeight(40)
-        self.live_start_button.setStyleSheet(
-            "QPushButton { background: #16a34a; color: white; font-weight: bold; padding: 8px 16px; border-radius: 6px; }"
-            "QPushButton:hover { background: #15803d; }"
-        )
-
-        self.start_button = QPushButton("⚡ Run In-Process Baseline")
-        self.start_button.setMinimumHeight(40)
-        self.start_button.setStyleSheet(
-            "QPushButton { background: #2563eb; color: white; font-weight: bold; padding: 8px 16px; border-radius: 6px; }"
-            "QPushButton:hover { background: #1d4ed8; }"
-        )
+        self.preset_size.setMinimumHeight(34)
 
         self.run_preset_button = QPushButton("📊 Run Preset Sweep")
-        self.run_preset_button.setMinimumHeight(40)
-        self.run_preset_button.setStyleSheet(
-            "QPushButton { background: #7c3aed; color: white; font-weight: bold; padding: 8px 16px; border-radius: 6px; }"
-            "QPushButton:hover { background: #6d28d9; }"
-        )
+        self.run_preset_button.setMinimumHeight(36)
+        self.run_preset_button.setStyleSheet(button_style("#7c3aed", "#6d28d9"))
 
-        self.stop_button = QPushButton("■ Stop")
-        self.stop_button.setMinimumHeight(40)
-        self.stop_button.setStyleSheet(
-            "QPushButton { background: #dc2626; color: white; font-weight: bold; padding: 8px 14px; border-radius: 6px; }"
-            "QPushButton:hover { background: #b91c1c; }"
-        )
+        self.stop_button = QPushButton("■ Stop Experiment")
+        self.stop_button.setMinimumHeight(36)
+        self.stop_button.setStyleSheet(button_style("#dc2626", "#b91c1c"))
 
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(10)
-        btn_row.addWidget(self.live_start_button, 2)
-        btn_row.addWidget(self.start_button, 1)
-        btn_row.addWidget(QLabel("<b>Preset:</b>"))
-        btn_row.addWidget(self.preset_combo, 2)
-        btn_row.addWidget(self.preset_size, 0)
-        btn_row.addWidget(self.run_preset_button, 1)
-        btn_row.addWidget(self.stop_button, 0)
-        outer.addLayout(btn_row)
-
-        status_row = QHBoxLayout()
-        status_row.setSpacing(12)
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
-        self.progress.setMinimumWidth(220)
-        self.progress.setMinimumHeight(22)
+        self.progress.setMinimumWidth(140)
+        self.progress.setMaximumWidth(190)
+        self.progress.setMinimumHeight(24)
 
         self.status = QLabel("Idle — ready")
-        self.status.setMinimumHeight(28)
-        self.status.setStyleSheet("font-weight: 600; padding: 4px 8px;")
+        self.status.setStyleSheet(
+            f"color: {COLOR_GREEN}; background: rgba(16, 185, 129, 0.12); "
+            f"border: 1px solid {COLOR_GREEN}; border-radius: 4px; padding: 4px 10px; font-weight: 700;"
+        )
 
-        status_row.addWidget(QLabel("<b>Progress:</b>"))
-        status_row.addWidget(self.progress)
-        status_row.addWidget(self.status, 1)
-        status_row.addWidget(self.no_recovery_checkbox)
-        status_row.addWidget(self.show_theory_checkbox)
-        status_row.addWidget(self.log_y_checkbox)
-        outer.addLayout(status_row)
+        self.show_theory_checkbox = QCheckBox("Theory (p, p²)")
+        self.show_theory_checkbox.setChecked(True)
+        self.log_y_checkbox = QCheckBox("Log-Y")
+
+        exec_layout.addWidget(self.live_start_button)
+        exec_layout.addWidget(self.start_button)
+        exec_layout.addWidget(QLabel("<b>Preset:</b>"))
+        exec_layout.addWidget(self.preset_combo, 1)
+        exec_layout.addWidget(self.preset_size)
+        exec_layout.addWidget(self.run_preset_button)
+        exec_layout.addWidget(self.stop_button)
+        exec_layout.addWidget(self.progress)
+        exec_layout.addWidget(self.status)
+        exec_layout.addWidget(self.show_theory_checkbox)
+        exec_layout.addWidget(self.log_y_checkbox)
+        outer.addWidget(exec_box)

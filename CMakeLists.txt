@@ -36,13 +36,48 @@ endif ()
 
 option(BUILD_PYTHON_BINDINGS "Build Python bindings" ON)
 if (BUILD_PYTHON_BINDINGS)
-    find_package(pybind11 QUIET)
+    # Locate the Python 3 interpreter that actually has pybind11 installed
+    # (preferring the active PATH python3 or macOS Framework Python over bare Homebrew python3.15).
+    find_program(_PATH_PYTHON3 python3)
+    set(_CANDIDATE_PYTHONS
+        "${Python3_EXECUTABLE}"
+        "${_PATH_PYTHON3}"
+        "/Library/Frameworks/Python.framework/Versions/Current/bin/python3"
+        "/Library/Frameworks/Python.framework/Versions/3.14/bin/python3"
+        "/opt/homebrew/bin/python3"
+        "/usr/local/bin/python3"
+        "/usr/bin/python3"
+    )
+    foreach (_PY_CANDIDATE IN LISTS _CANDIDATE_PYTHONS)
+        if (_PY_CANDIDATE AND EXISTS "${_PY_CANDIDATE}")
+            execute_process(
+                COMMAND "${_PY_CANDIDATE}" -c "import pybind11; print(pybind11.get_cmake_dir())"
+                OUTPUT_VARIABLE _PYBIND11_CMAKE_DIR
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET
+                RESULT_VARIABLE _PYBIND11_RES
+            )
+            if (_PYBIND11_RES EQUAL 0 AND EXISTS "${_PYBIND11_CMAKE_DIR}")
+                set(Python3_EXECUTABLE "${_PY_CANDIDATE}" CACHE FILEPATH "Python3 executable with pybind11" FORCE)
+                set(PYTHON_EXECUTABLE "${_PY_CANDIDATE}" CACHE FILEPATH "Python executable for pybind11" FORCE)
+                set(pybind11_DIR "${_PYBIND11_CMAKE_DIR}" CACHE PATH "pybind11 CMake directory" FORCE)
+                list(APPEND CMAKE_PREFIX_PATH "${_PYBIND11_CMAKE_DIR}")
+                break ()
+            endif ()
+        endif ()
+    endforeach ()
+
+    find_package(pybind11 CONFIG QUIET)
+    if (NOT pybind11_FOUND)
+        find_package(pybind11 QUIET)
+    endif ()
+
     if (pybind11_FOUND)
-        message(STATUS "Building Python bindings")
+        message(STATUS "Building Python bindings with Python=${Python3_EXECUTABLE} and pybind11=${pybind11_DIR}")
         add_subdirectory(lib/OrderBook/python)
         add_subdirectory(lib/MDFeed/python)
         add_subdirectory(lib/OrderEntry/python)
     else ()
-        message(WARNING "pybind11 not found, skipping Python bindings")
+        message(WARNING "pybind11 not found, skipping C++ Python bindings (orderbook/__init__.py will use pure-Python fallback)")
     endif ()
 endif ()

@@ -130,7 +130,7 @@ cd reliable-market-data-exchange
 ```bash
 cmake -S . -B build-local \
   -DBUILD_BENCHMARKS=OFF \
-  -DBUILD_PYTHON_BINDINGS=OFF \
+  -DBUILD_PYTHON_BINDINGS=ON \
   -DBUILD_PROJECT_TESTS=ON \
   -DCMAKE_BUILD_TYPE=Release
 
@@ -139,6 +139,7 @@ cmake --build build-local -j8
 
 The CMake build compiles:
 - **Core Libraries:** `OrderBook`, `MDFeed`, `OrderEntry`
+- **Python Bindings (`orderbook/`):** `_orderbook`, `_mdfeed_receiver`, `_orderentry_client` (with an automatic pure-Python fallback in `orderbook/__init__.py`)
 - **Exchange & Server Binaries:** `exchange`, `order_server`
 - **Client & Subscriber Binaries:** `reliable_subscriber`, `workload_client`, `order_client`, `recovery_client`, `client`
 - **Deterministic Harness & Unit Tests:** `reliability_demo`, `tests/Tests` (51 GoogleTests)
