@@ -107,7 +107,7 @@ pip3 install PyQt6 pyqtgraph numpy matplotlib pybind11
 
 ```bash
 # If from repository
-git clone https://github.com/your-org/reliable-market-data-exchange.git
+git clone https://github.com/Perpetu4l/reliable-market-data-exchange.git
 cd reliable-market-data-exchange
 
 # If from archive
