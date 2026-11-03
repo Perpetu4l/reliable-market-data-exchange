@@ -117,11 +117,9 @@ cd reliable-market-data-exchange
 
 ### Step 3: Verify Documentation References
 
-- **[`docs/VIVA_DEMO_SCRIPT.md`](docs/VIVA_DEMO_SCRIPT.md)** — Live demo walkthrough and button-by-button GUI guide
 - **[`docs/RECOVERY_PROTOCOL.md`](docs/RECOVERY_PROTOCOL.md)** — Framed TCP Recovery Protocol v2 wire specification
 - **[`docs/METRICS.md`](docs/METRICS.md)** — Sequence-accounting invariants, repair latency classes, and fairness formulas
 - **[`docs/LIVE_TESTING.md`](docs/LIVE_TESTING.md)** — Single-host loopback, two-laptop LAN (`udp_lan`), and `tc netem` / `pfctl` setup
-- **[`docs/DESIGN_DOC_ERRATA.md`](docs/DESIGN_DOC_ERRATA.md)** — Design refinements over the initial v0.1 Design Document (`docs/Group_11_Design Document.pdf`)
 
 ---
 
