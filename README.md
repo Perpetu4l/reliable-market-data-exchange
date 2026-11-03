@@ -280,6 +280,21 @@ wait
 
 ---
 
+## Docs and Demo-video
+
+### Documentation
+All project documentation can be found in the [`/docs/`](./docs/) directory:
+* [Presentation with Voiceover (PPTX)](./docs/presentation_with_voiceover_group_11.pptx)
+* [Project Report (DOCX)](./docs/report_group_11.docx)
+* [Project Report (PDF)](./docs/report_group_11.pdf)
+
+### Demo Video
+* [Watch the Demo Video](https://drive.google.com/file/d/1vR1X28Q2kzbQwV-DKE331hBNdHY7YKMR/view?usp=sharing) 
+
+
+
+---
+
 ## Configuration Options
 
 ### 1. `exchange` Command-Line Arguments
