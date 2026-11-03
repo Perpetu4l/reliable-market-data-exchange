@@ -743,12 +743,7 @@ reliable-market-data-exchange/
 │   └── plot_results.py              # Generates 6 publication PNG charts from preset CSVs
 │
 └── docs/
-    ├── Group_11_Design Document.pdf # Original Group 11 system design specification
-    ├── VIVA_DEMO_SCRIPT.md          # 5-minute viva demo script & visual GUI guide
-    ├── RECOVERY_PROTOCOL.md         # Framed TCP Recovery Protocol v2 specification
-    ├── METRICS.md                   # Formal sequence accounting & latency class definitions
-    ├── LIVE_TESTING.md              # Loopback, 2-laptop LAN (udp_lan), and netem/pfctl guide
-    └── DESIGN_DOC_ERRATA.md         # Engineering refinements over the v0.1 design draft
+    
 ```
 
 ### File Responsibilities
